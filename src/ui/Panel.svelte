@@ -1,11 +1,13 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { slimeSteps } from '../engine/slime';
   import {
     BOUNDARIES,
     capacityOf,
     collisionsHelp,
     coveredFoodHelp,
     decayForReach,
+    flowEdgesHelp,
     flowHelp,
     globalSpec,
     repellentSpec,
@@ -18,24 +20,27 @@
     sameLattice,
     scentReach,
     scentReachSpec,
+    frontViewHelp,
+    slimeViewHelp,
     snap,
     STEP_ORDERS,
     stepOrderHelp,
     GEL_COLORS,
     STYLES,
+    territoryHelp,
     tubeViewHelp,
     type Lattice,
     type Strain,
   } from '../model/params';
   import {
+    figureLattice,
     GROUPS,
     latticeLostNotice,
     latticeNotice,
+    latticeOrigin,
     latticeText,
     PRESETS,
     presetById,
-    ruleOffNotice,
-    usesRule,
   } from '../model/presets';
   import Matrix from './Matrix.svelte';
   import SceneCard from './SceneCard.svelte';
@@ -45,15 +50,16 @@
     addStrain,
     app,
     clearEnvironment,
+    clearLabel,
     getEngine,
     latticeLeft,
     latticeValue,
-    lightName,
     loadPreset,
     pickGrid,
     removeStrain,
     setModel,
-    showNotice,
+    setRule,
+    setRules,
     useSceneLattice,
   } from './state.svelte';
   import StrainCard from './StrainCard.svelte';
@@ -69,6 +75,8 @@
       ? app.lostLattice
       : undefined,
   );
+  /** The lattice of the scene is that of a figure of Jones 2010: only then the texts about the grid name the paper. */
+  const figure = $derived(figureLattice(presetById(app.scene)));
   let gridSelect = $state<HTMLSelectElement>();
 
   // The button removes itself with the hint: the focus goes to the grid choice it changed, not to the page.
@@ -92,7 +100,7 @@
     ring: 'Ring',
     center: 'Center spot',
     empty: 'Empty (inoculate)',
-    food: 'On food, one colony each',
+    food: 'On food or start, one colony each',
     line: 'Vertical line',
   };
   const BOUNDARY_LABEL: Record<(typeof BOUNDARIES)[number], string> = {
@@ -125,9 +133,20 @@
   let coveredHelp = $state(false);
   let growthHelpOpen = $state(false);
   let flowHelpOpen = $state(false);
+  let edgesHelpOpen = $state(false);
+  let territoryHelpOpen = $state(false);
   let tubeHelpOpen = $state(false);
+  let slimeHelpOpen = $state(false);
+  let frontHelpOpen = $state(false);
+  /** The model has slime (ADR 0055): the extended model with a Slime life time above 0. */
+  const slimy = $derived(slimeSteps(s) > 0);
   /** Growth and shrinkage need one agent per cell: their window counts assume it (ADR 0025). */
   const canGrow = $derived(app.canCollide && s.collisions);
+  /**
+   * The rules of the growth front run (engine/territory.ts territoryOn(), ADR 0068): their switch, with the flow and
+   * growth, which needs the rule of one agent per cell.
+   */
+  const rules = $derived(s.flow && s.growth && canGrow && s.territory);
   /** The most Capacity can be: one agent per cell with the rule (capacityOf()). */
   const capacityMax = $derived(s.collisions ? 1 : globalSpec.capacity.max);
   /**
@@ -147,21 +166,6 @@
     await tick();
     document.getElementById('capacity')?.focus();
   }
-
-  // The engine restarts the population on every switch, so agents stacked without the rule do not stay
-  // stacked (ADR 0008).
-  function setRule(on: boolean) {
-    const growing = s.growth;
-    s.collisions = on;
-    const scene = presetById(app.scene);
-    const growth = !on && growing ? ` ${GROWTH_OFF}` : '';
-    if (!on && scene && usesRule(scene)) showNotice(ruleOffNotice(scene) + growth, 15_000);
-    else if (growth) showNotice(GROWTH_OFF);
-  }
-
-  /** Shown when the rule goes off while growth is on: constrain() turns growth off with it. */
-  const GROWTH_OFF =
-    'Growth and shrinkage need one agent per cell, so they are off now. Switch them on again after you tick the rule.';
 </script>
 
 <aside class="panel" aria-label="Simulation settings">
@@ -210,7 +214,7 @@
       >
         {#each lattices as l (latticeValue(l))}
           <option value={latticeValue(l)}
-            >{latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? ', as in the paper' : ''}</option
+            >{latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? latticeOrigin(figure) : ''}</option
           >
         {/each}
         {#each RESOLUTIONS as r (r)}<option value={String(r)}>{r} cells on the long side</option>{/each}
@@ -218,11 +222,11 @@
     </label>
     {#if left}
       <div class="lattice" id="lattice-help">
-        <p class="helptext">{latticeNotice(left, s)}</p>
+        <p class="helptext">{latticeNotice(left, s, figure)}</p>
         <button type="button" class="action" onclick={useLattice}>Use {latticeText(left)}</button>
       </div>
     {:else if lost}
-      <p class="helptext" id="lattice-help">{latticeLostNotice(lost, s)}</p>
+      <p class="helptext" id="lattice-help">{latticeLostNotice(lost, s, figure)}</p>
     {/if}
     <div class="check">
       <label>
@@ -386,7 +390,7 @@
       <Slider spec={globalSpec.coveredFoodFactor} bind:value={s.coveredFoodFactor} id="covered-factor" />
     {/if}
     <Slider spec={globalSpec.shrink} bind:value={s.shrink} id="shrink" />
-    <button type="button" onclick={clearEnvironment}>Clear food, {lightName(s.model)}, walls and electrodes</button>
+    <button type="button" onclick={clearEnvironment}>{clearLabel(s)}</button>
   </Section>
 
   <Section title="Growth">
@@ -487,6 +491,67 @@
       {/if}
       {#if s.flow}
         <Slider spec={globalSpec.flowStrength} bind:value={s.flowStrength} id="flow-strength" />
+        <!-- The neighbours and the base conductance of the flow act in every scene with the flow (ADR 0086); a change
+        acts at the next step. -->
+        <div class="check">
+          <label>
+            <input
+              type="checkbox"
+              checked={s.flowEdges === 8}
+              aria-describedby={edgesHelpOpen ? 'edges-help' : undefined}
+              onchange={(e) => {
+                s.flowEdges = e.currentTarget.checked ? 8 : 4;
+              }}
+            />
+            <span>{flowEdgesHelp.label}</span>
+          </label>
+          <button
+            class="help"
+            type="button"
+            aria-expanded={edgesHelpOpen}
+            aria-controls="edges-help"
+            aria-label="About {flowEdgesHelp.label}"
+            onclick={() => (edgesHelpOpen = !edgesHelpOpen)}>?</button
+          >
+        </div>
+        {#if edgesHelpOpen}
+          <p class="helptext" id="edges-help">{flowEdgesHelp.help}</p>
+        {/if}
+        <Slider spec={globalSpec.flowBase} bind:value={s.flowBase} id="flow-base" />
+        <!-- The rules of the growth front run only with growth, and so with one agent per cell, and the flow
+        (territoryOn(), ADR 0068); a switch restarts the scene. Their drift and their flux to the front act only with
+        them (ADR 0070, ADR 0086). Their switch on also sets the levers of the Crown of veins (setRules(),
+        ADR 0098). -->
+        {#if s.growth && canGrow}
+          <div class="check">
+            <label>
+              <input
+                type="checkbox"
+                checked={s.territory}
+                aria-describedby={territoryHelpOpen ? 'territory-help' : undefined}
+                onchange={(e) => {
+                  setRules(e.currentTarget.checked);
+                }}
+              />
+              <span>{territoryHelp.label}</span>
+            </label>
+            <button
+              class="help"
+              type="button"
+              aria-expanded={territoryHelpOpen}
+              aria-controls="territory-help"
+              aria-label="About {territoryHelp.label}"
+              onclick={() => (territoryHelpOpen = !territoryHelpOpen)}>?</button
+            >
+          </div>
+          {#if territoryHelpOpen}
+            <p class="helptext" id="territory-help">{territoryHelp.help} <cite>{territoryHelp.ref}</cite></p>
+          {/if}
+          {#if s.territory}
+            <Slider spec={globalSpec.drift} bind:value={s.drift} id="drift" />
+            <Slider spec={globalSpec.frontFlux} bind:value={s.frontFlux} id="front-flux" />
+          {/if}
+        {/if}
         <!-- The picture of the tubes changes the view only (ADR 0034). -->
         <div class="check">
           <label>
@@ -508,6 +573,72 @@
         </div>
         {#if tubeHelpOpen}
           <p class="helptext" id="tube-help">{tubeViewHelp.help}</p>
+        {/if}
+      {/if}
+    </Section>
+
+    <!-- The slime is a part of the extended model only (ADR 0055). It needs no flow, so it has a section of its own. -->
+    <Section title="Slime">
+      <!-- How long the slime stays where the colony was. At 0 the model has no slime, and the switch below goes. -->
+      <Slider spec={globalSpec.slimeLife} bind:value={s.slimeLife} id="slime-life" />
+      <!-- The avoidance of slime is a part of the rules of the growth front (ADR 0088): its two settings show while the
+      rules run and the model has slime, and a line names the switch of the rules while they do not run. A change acts
+      at the next step. -->
+      {#if slimy && rules}
+        <Slider spec={globalSpec.slimeWeight} bind:value={s.slimeWeight} id="slime-weight" />
+        <Slider spec={globalSpec.freshReach} bind:value={s.freshReach} id="fresh-reach" />
+      {:else if slimy}
+        <p class="hint">
+          The avoidance of slime needs the switch Rules of the growth front in the Flow section, which shows with Flow
+          in the tubes and Growth and shrinkage.
+        </p>
+      {/if}
+      {#if slimy}
+        <!-- The film of the slime changes the view only (decision 8). -->
+        <div class="check">
+          <label>
+            <input
+              type="checkbox"
+              bind:checked={s.showSlime}
+              aria-describedby={slimeHelpOpen ? 'slime-help' : undefined}
+            />
+            <span>{slimeViewHelp.label}</span>
+          </label>
+          <button
+            class="help"
+            type="button"
+            aria-expanded={slimeHelpOpen}
+            aria-controls="slime-help"
+            aria-label="About {slimeViewHelp.label}"
+            onclick={() => (slimeHelpOpen = !slimeHelpOpen)}>?</button
+          >
+        </div>
+        {#if slimeHelpOpen}
+          <p class="helptext" id="slime-help">{slimeViewHelp.help}</p>
+        {/if}
+        <!-- The skirt of the growth front changes the view only (ADR 0060). The front field is a part of the slime. -->
+        {#if s.growth && s.collisions}
+          <div class="check">
+            <label>
+              <input
+                type="checkbox"
+                bind:checked={s.showFront}
+                aria-describedby={frontHelpOpen ? 'front-help' : undefined}
+              />
+              <span>{frontViewHelp.label}</span>
+            </label>
+            <button
+              class="help"
+              type="button"
+              aria-expanded={frontHelpOpen}
+              aria-controls="front-help"
+              aria-label="About {frontViewHelp.label}"
+              onclick={() => (frontHelpOpen = !frontHelpOpen)}>?</button
+            >
+          </div>
+          {#if frontHelpOpen}
+            <p class="helptext" id="front-help">{frontViewHelp.help}</p>
+          {/if}
         {/if}
       {/if}
     </Section>

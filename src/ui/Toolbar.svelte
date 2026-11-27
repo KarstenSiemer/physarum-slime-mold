@@ -42,7 +42,7 @@
   </div>
 
   <div class="group" role="radiogroup" aria-label="Tool">
-    {#each toolsFor(app.settings.model) as t (t.id)}
+    {#each toolsFor(app.settings) as t (t.id)}
       <button
         type="button"
         role="radio"

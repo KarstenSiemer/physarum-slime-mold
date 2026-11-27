@@ -5,7 +5,7 @@ import { AutoExposure, type Trails } from './exposure';
 import { initGpu, OutOfMemoryError, type Gpu } from './gpu';
 import { Renderer, type Frame } from './render';
 import { Simulation } from './sim';
-import { BYTES_PER_AGENT, BYTES_PER_CELL, equilibrium } from './sizing';
+import { BYTES_PER_AGENT, BYTES_PER_CELL, equilibrium, SINK_BYTES_PER_CELL } from './sizing';
 import type { Backend, Levels, View } from './types';
 
 // The agent id has 24 bits (ADR 0005, shaders/common.wgsl).
@@ -19,6 +19,8 @@ export class WebGpuBackend implements Backend<Simulation> {
   readonly bytesPerAgent = BYTES_PER_AGENT;
   readonly coveredBytesPerCell = 0; // covered food counts into the collision buffers
   readonly tubeMapBytesPerCell = 0; // the picture of the tubes holds its map in the memory of a workgroup
+  readonly sinkBytesPerCell = SINK_BYTES_PER_CELL; // the sink rates and take / G, per strain (sim.ts `sinks`)
+  readonly driftBytesPerCell = 0; // take / G is in sinkBytesPerCell; the sensors read the pressure of the flow
 
   readonly description: string;
   readonly lost: Promise<string>;
@@ -103,7 +105,7 @@ export class WebGpuBackend implements Backend<Simulation> {
   async capture(sim: Simulation, settings: Settings, view: View, width: number, height: number, levels?: Levels) {
     // An export shows the view as asked: its pipelines are built first. A rebuild can destroy the simulation in
     // that time. Then nothing is left to draw, and the engine asks again for the new one (Engine.ofRun()).
-    await this.renderer.ready(settings);
+    await this.renderer.ready(sim, settings);
     if (sim.destroyed) return new ImageData(width, height);
     return this.renderer.capture(this.frame(sim, settings, view, false, levels), width, height);
   }
@@ -114,7 +116,8 @@ export class WebGpuBackend implements Backend<Simulation> {
    * waits for the one before it.
    */
   private trailsOf(sim: Simulation) {
-    return (): Trails | undefined => (sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture]);
+    return (): Trails | undefined =>
+      sim.destroyed ? undefined : [sim.pictureTexture, sim.viewTexture, sim.agentCells, sim.movedCells];
   }
 
   async settle(sim: Simulation): Promise<Levels> {
@@ -165,7 +168,7 @@ export class WebGpuBackend implements Backend<Simulation> {
     const fallback = 0.4 / equilibrium(s);
     // The agents style draws without levels, but the scent view's mark needs the strand in every style (ADR 0009). The
     // strand is a level of the trail of the model, with or without the picture of the tubes.
-    if (measure && (!agents || s.showScent)) this.auto.update(trail, fallback, sim.viewTexture);
+    if (measure && (!agents || s.showScent)) this.auto.update(this.trailsOf(sim), fallback);
     const l = given ?? this.levels();
     const base = agents ? 0.4 / s.density : l.gain || fallback;
     const exposure = base * 2 ** s.exposure;

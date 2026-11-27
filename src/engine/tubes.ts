@@ -1,6 +1,6 @@
 // The picture of the tubes (ADR 0034): while the flow in the tubes is on, the view draws every tube as wide and as
-// bright as its tube body and its flow memory say, and grains that move with the flux. Display only: no pass of the
-// simulation reads the picture.
+// bright as its tube body and its flow memory say. It also draws grains that move with the flux, with the picture or
+// without it (ADR 0095). Display only: no pass of the simulation reads the picture or the stream of the grains.
 //
 // The rule, per strain. `tubes.wgsl` and `gl/glsl/tubes.frag` run it on the GPU, and `tubes-reference.ts` on the CPU
 // for the tests.
@@ -34,7 +34,14 @@
 //    with the fastest flow counts. The view draws grains that move along the stream (`streaming` in render.wgsl), and
 //    their pattern starts again after `period` steps. The grains go back and forth once in `swing` steps, as the plasm
 //    of the organism does in about 2 minutes, and they go on with the stream a little in each swing. The model holds
-//    the mean flow alone: the swing is in the picture only.
+//    the mean flow alone: the swing is in the picture only. The grains do not need the picture of the tubes: without
+//    it they move over the trail of the view (grainsShown(), ADR 0095).
+// 7. The veins (ADR 0099): with the picture, the view draws a vein of a strain in a deeper and darker shade of the
+//    colour of the strain, and in the gel style as a low lit ridge. The strength of a vein at a point is the square
+//    root of the strength across the tube (point 2), as a quadratic B-spline over the 3 × 3 cells around the point.
+//    From `low` to `high` it takes the shade in a smooth step, up to `deep` of the way from the colour c of the strain
+//    to `dark` · c², which is more saturated (VEINS; `veinsAt` in render.wgsl and render.frag). The render pass reads
+//    the factors of point 3 for it, so the veins need no texture of their own.
 import type { Settings } from '../model/params';
 import { flowOn } from './flow';
 
@@ -58,6 +65,20 @@ export const STREAM = {
   swing: 60,
 } as const;
 
+/** The veins of the picture (point 7, ADR 0099): the numbers of `veinsAt()` in render.wgsl and render.frag. */
+export const VEINS = {
+  /** How far a whole vein goes from the colour of its strain to the deep shade. */
+  deep: 0.8,
+  /** The deep shade: the colour of the strain squared, times this. */
+  dark: 0.8,
+  /** The strength of a vein at which the shade begins. */
+  low: 0.2,
+  /** The strength of a vein at which the shade is whole. */
+  high: 0.7,
+  /** Gel style: the height of the ridge of a whole vein, cells. */
+  rise: 1,
+} as const;
+
 /** The farthest that a disc reaches, cells: the radius and half the edge. */
 export const TUBE_REACH = TUBES.radius + TUBES.edge / 2;
 
@@ -78,3 +99,9 @@ export const TUBE_TILE = 8;
  */
 export const tubesShown = (s: Pick<Settings, 'showTubes' | 'flow' | 'model' | 'style'>) =>
   s.showTubes && flowOn(s) && s.style !== 'agents';
+
+/**
+ * Whether the view draws the grains of the plasm (point 6): the flow runs and the style draws the trail. The switch of
+ * the picture of the tubes changes only the tubes (ADR 0095): without it the grains move over the trail of the view.
+ */
+export const grainsShown = (s: Pick<Settings, 'flow' | 'model' | 'style'>) => flowOn(s) && s.style !== 'agents';

@@ -27,6 +27,9 @@ layout(std140) uniform Params {
   uvec4 shrinkage;     // shrinkage test every Sf steps (0 off), window Sw, Smin, Smax (ADR 0025)
   uvec4 startEnd;      // exclusive end index of each strain's agents alive at the start (ADR 0025)
   vec4 electrode;      // the source of a cell of an electrode (ADR 0047); y: Light stops growth (ADR 0050)
+  vec4 slimeLow;       // per strain the trail from which a cell holds plasm (ADR 0055; flow.ts trailLevels())
+  uvec4 slime;         // the life time of the slime in steps, 0 for no slime (ADR 0055); y, z, w unused
+  vec4 drift;          // per strain the weight of the pressure in the sensors, with the rules of stage 4 (ADR 0070)
 } P;
 
 const float PI = 3.14159265358979;
@@ -37,6 +40,11 @@ const uint ALIVE = 4u;
 const uint MOVED = 8u;  // deposited this step (read by the point pass)
 const uint WANTS = 16u; // claimed a cell this step (collision mode); at init: waits for a start cell
 const uint PLACE = 32u; // with WANTS: claimed the cell of a tool's spot (tools.glsl placement)
+// With the rules of stage 4 (ADR 0100; paid.vert counts them): a respawn that waits for the budget (agents.frag mode 1),
+// a death that gives plasm back (mode 1), and a respawn that came to life (mode 2).
+const uint WAITS = 4096u;
+const uint DIED = 8192u;
+const uint REBORN = 16384u;
 
 int W() { return int(P.grid.x); }
 int H() { return int(P.grid.y); }

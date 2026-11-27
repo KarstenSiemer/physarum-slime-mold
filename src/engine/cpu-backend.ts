@@ -1,11 +1,14 @@
 // A backend for the engine tests in Node, for tests only: it paints with paint-reference.ts, the CPU mirror of the
-// paint shaders (sim.gpu.test.ts compares that mirror with both GPU backends), and simulates nothing else.
+// paint shaders (sim.gpu.test.ts compares that mirror with both GPU backends), and with the brush of
+// slime-reference.ts on the slime field (slime.gpu.test.ts compares it with both). It simulates nothing else.
 import type { Settings } from '../model/params';
 import type { AgentTool } from './pack';
 import { paintReference } from './paint-reference';
 import { NO_SITES, type FlowSites } from './sites';
-import { BYTES_PER_AGENT, BYTES_PER_CELL } from './sizing';
-import { isPole, type Backend, type Sim, type Stroke } from './types';
+import { BYTES_PER_AGENT, BYTES_PER_CELL, SINK_BYTES_PER_CELL } from './sizing';
+import { slimeModel, slimeSteps } from './slime';
+import { slimePaint } from './slime-reference';
+import { changesSlime, isPole, paintsEnv, type Backend, type Sim, type Stroke } from './types';
 
 export class CpuSim implements Sim {
   step = 0;
@@ -16,6 +19,16 @@ export class CpuSim implements Sim {
   hasElectrodes = false;
   /** Calls in order, to check that the environment is painted before the agents are placed. */
   readonly calls: string[] = [];
+  /**
+   * The slime field as on both GPU backends (ADR 0055): the stamp of every cell, held while the model has slime. No
+   * step writes a stamp here: only the brush does (slime-reference.ts slimePaint()), and a test that stands for the
+   * colony.
+   */
+  slime: Uint32Array | undefined;
+  /** The amount of slime of every cell (ADR 0057), held with the stamps. */
+  amount: Uint32Array | undefined;
+  /** The front stamp of every cell (ADR 0060), held with the stamps. */
+  front: Uint32Array | undefined;
 
   constructor(
     private settings: Settings,
@@ -29,9 +42,16 @@ export class CpuSim implements Sim {
   }
   update(s: Settings) {
     this.settings = s;
+    // The Jones model has no slime: a switch to it frees the field with its stamps.
+    if (!slimeModel(s)) [this.slime, this.amount, this.front] = [undefined, undefined, undefined];
   }
   reset() {
     this.revision++;
+    this.step = 0;
+    // A reset clears every stamp, and the amounts with them.
+    this.slime?.fill(0);
+    this.amount?.fill(0);
+    this.front?.fill(0);
     this.calls.push('reset');
   }
   /** The agent tools of the steps that ran, in order (the start layout 'food' places its colonies with one). */
@@ -44,15 +64,45 @@ export class CpuSim implements Sim {
     if (strokes.length > 0) this.revision++;
     for (const s of strokes) {
       this.calls.push('paint');
-      if (s.kind !== 'erase') this.hasEnvironment = true;
-      if (isPole(s.kind)) this.hasElectrodes = true;
-      paintReference(this.env, this.width, this.height, s, this.settings.boundary);
+      if (paintsEnv(s.kind)) {
+        if (s.kind !== 'erase') this.hasEnvironment = true;
+        if (isPole(s.kind)) this.hasElectrodes = true;
+        paintReference(this.env, this.width, this.height, s, this.settings.boundary);
+      }
+      this.slimeOf(s);
     }
+  }
+  paintSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings) || !strokes.some((s) => changesSlime(s.kind))) return;
+    this.revision++;
+    this.calls.push('slime');
+    for (const s of strokes) this.slimeOf(s);
+  }
+  /**
+   * What a stroke does with the slime field, against the environment as it is now. The field is made at the first
+   * stroke of the Slime tool: before it no cell holds a stamp, and an erase or a wall has nothing to clear.
+   */
+  private slimeOf(s: Stroke) {
+    if (!slimeModel(this.settings) || !changesSlime(s.kind)) return;
+    if (s.kind === 'slime') this.slime ??= new Uint32Array(this.width * this.height);
+    if (!this.slime) return;
+    this.amount ??= new Uint32Array(this.width * this.height);
+    this.front ??= new Uint32Array(this.width * this.height);
+    const { width, height, env } = this;
+    const grid = { width, height, boundary: this.settings.boundary, env };
+    slimePaint(grid, this.settings, this.step, this.slime, s, undefined, {
+      amounts: this.amount,
+      life: slimeSteps(this.settings),
+      fronts: this.front,
+    });
   }
   clearEnvironment() {
     this.revision++;
     this.calls.push('clear');
     this.env.fill(0);
+    this.slime?.fill(0);
+    this.amount?.fill(0);
+    this.front?.fill(0);
     this.hasEnvironment = false;
     this.hasElectrodes = false;
   }
@@ -66,6 +116,53 @@ export class CpuSim implements Sim {
   }
   readPressure() {
     return Promise.resolve(new Float32Array(0));
+  }
+  readSlime() {
+    return Promise.resolve(this.slime?.slice() ?? new Uint32Array(this.width * this.height));
+  }
+  readSlimeAmount() {
+    return Promise.resolve(this.amount?.slice() ?? new Uint32Array(this.width * this.height));
+  }
+  readSlimeFront() {
+    return Promise.resolve(this.front?.slice() ?? new Uint32Array(this.width * this.height));
+  }
+  /**
+   * The discs of the start territory that the engine asked for, in order, with the step at which each came
+   * (Sim.addTerritory()). No step reads them here.
+   */
+  readonly territories: { strain: number; x: number; y: number; radius: number; step: number }[] = [];
+  addTerritory(strain: number, x: number, y: number, radius: number) {
+    this.territories.push({ strain, x, y, radius, step: this.step });
+  }
+  readTerritory() {
+    return Promise.resolve(new Uint8Array(this.width * this.height));
+  }
+  readOwners() {
+    return Promise.resolve(new Uint8Array(this.width * this.height));
+  }
+  writeTerritory() {
+    // nothing to write
+  }
+  readSinks() {
+    return Promise.resolve(new Float32Array(this.width * this.height));
+  }
+  readSinkSums() {
+    return Promise.resolve(new Uint32Array(0));
+  }
+  readSinkState() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  writeSinkState() {
+    // nothing to write
+  }
+  readPaidKeys() {
+    return Promise.resolve(new Float32Array(0));
+  }
+  readPaidCounts() {
+    return Promise.resolve(new Uint32Array(0));
+  }
+  writeSinks() {
+    // nothing to write
   }
   writeFlow() {
     // nothing to write
@@ -128,6 +225,16 @@ export class CpuSim implements Sim {
     }
     return Promise.resolve(shape);
   }
+  /** As readShape(): 128 in the first byte where `env` holds a cathode, and in the second where it holds an anode. */
+  readPoles() {
+    const poles = new Uint8Array(this.env.length);
+    for (let i = 0; i < this.env.length; i += 4) {
+      const pole = this.env[i + 3] ?? 0;
+      poles[i] = pole > 191 ? 128 : 0;
+      poles[i + 1] = pole > 0 && pole <= 191 ? 128 : 0;
+    }
+    return Promise.resolve(poles);
+  }
   writeAgent() {
     // agents are not simulated here
   }
@@ -155,6 +262,8 @@ export class CpuBackend implements Backend<CpuSim> {
   bytesPerAgent = BYTES_PER_AGENT;
   coveredBytesPerCell = 0;
   tubeMapBytesPerCell = 0; // as the WebGPU backend
+  sinkBytesPerCell = SINK_BYTES_PER_CELL; // as the WebGPU backend
+  driftBytesPerCell = 0; // as the WebGPU backend
   readonly supportsCollisions = true;
   readonly lost = new Promise<string>(() => undefined);
   /** Set by the engine; a test calls it as the WebGPU device does (Backend.onOutOfMemory). */

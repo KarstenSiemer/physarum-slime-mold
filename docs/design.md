@@ -107,8 +107,9 @@ strains (one `vec4` lane each).
 | `trail[2]`         | `rgba32float` texture, ping-pong                 | 16 B × W × H     | chemoattractant per strain                            |
 | `scent[2]`         | `rg32float` texture, ping-pong                   | 8 B × W × H      | food attractant (r), light repellent (g)              |
 | `counts`           | storage `atomic<u32>` × 4 per cell               | 16 B × W × H     | successful moves that ended in the cell, per strain   |
-| `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall (from 128 on), food, light         |
+| `env`              | storage `u32` per cell                           | 4 B × W × H      | packed bytes: wall (from 128 on), food, light, pole   |
 | `shape`            | storage `u32` per cell (WebGL2: `RGBA8` texture) | 4 B × W × H      | renderer only: outline distances, light, wall shadow  |
+| `poles`            | storage `u32` per cell (WebGL2: `RGBA8` texture) | 4 B × W × H      | renderer only: the outlines of the poles (ADR 0058)   |
 | `occ[2]`, `claims` | storage `u32` per cell                           | 4 B × W × H each | occupancy and move claims                             |
 | `params`           | uniform                                          | < 1 KiB          | all parameters, packed from `params.ts`               |
 | `clearance`        | storage `u32` per 8 × 8 tile (WebGL2: `R32F`)    | 2 × 4 B per tile | wall in the tile; distance to walls (ADR 0020)        |
@@ -116,6 +117,13 @@ strains (one `vec4` lane each).
 | view trail, scent  | `rgba32float`, `rg32float` (WebGL2: targets)     | 24 B × W × H     | moving first with 2+ passes only: the view (ADR 0027) |
 | flow (while on)    | `rgba32float` textures: memory × 2, pressure × 3 | 80 B × W × H × S | per strain (S strains, ADR 0031), extended model only |
 | tubes (with flow)  | `rgba32float` textures: radius, picture, stream  | 48 B × W × H     | the picture of the tubes, the view only (ADR 0034)    |
+| slime (extended)   | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the stamp of the slime of each cell (ADR 0055)        |
+| slime amount       | storage `u32` per cell (WebGL2: `R16UI` × 2)     | 4 B × W × H      | how much slime each cell holds, the view only (0057)  |
+| film of the slime  | `r16float` textures: a map and a coarse map      | 2.5 B × W × H    | renderer only: the thickness of the film (ADR 0057)   |
+| front stamps       | storage `u32` per cell (WebGL2: `R32UI` texture) | 4 B × W × H      | the step at which the front reached a cell (ADR 0060) |
+| map of the front   | `rgba32float` texture, texels of 8 × 8 cells     | 0.25 B × W × H   | renderer only: young plasm and its age (ADR 0060)     |
+| `territory[2]`     | `r32uint`, 4 cells per texel (WebGL2: `R8UI`)    | 2 B × W × H      | the territory of each strain, bit s (ADR 0068)        |
+| `owners`           | storage `u32` per 4 cells (WebGL2: `R8UI`)       | 1 B × W × H      | the strains of the agent of each cell (ADR 0068)      |
 
 The table holds the main resources. `BYTES_PER_CELL` in `src/engine/sizing.ts` counts all of them for the fit of the grid
 to the GPU, also the bloom chain, the gel height field, the two coarse maps of the view and, on WebGL2 without float
@@ -134,6 +142,14 @@ only as far as the cells it paints allow, so a stroke beside the edge of a box o
 dish changes no outline where it paints no cell. After a change of boundary,
 and after a replay of edits painted under another boundary, they are held to `env` again under
 the boundary on screen.
+
+`poles` holds the same two distances for the electrodes: to the outline of the cathodes and to the outline of the
+anodes (ADR 0058). The same pass writes it, for a stroke of a pole and, from the first pole on, for an erase and a
+wall. A cell holds one pole, so a pole takes its cells from the other pole. The pole below a pole or a wall ends
+where the rounded union of that stroke begins, so that no ground shows between the two; below an erase it ends at the
+plain distance of the stroke. A simulation makes the buffer at its first pole and frees it at a Clear. The fit of
+the grid counts its 4 B per cell from the start, so a stroke never changes the grid. A CPU copy of the pass, for
+both buffers, is `outlineModel()` in `src/engine/outline-reference.ts`.
 
 `rgba32float` and not `rgba16float`: with half floats `x · (1 − 0.0001)` rounds back to `x`,
 so the small decay values from Jones Fig. 12 would stop working.
@@ -167,7 +183,12 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
    last pass, the mean, the order of the step, covered food and the view. WebGL2 uses uniforms for the first and the
    last pass, the mean and the order (`P.model.w`), and separate programs for covered food and the view. The cut is a
    uniform on both.
-6. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
+6. **Stamp pass of the slime**, only in the extended model while the Slime life time is above 0 (model.md,
+   section 6.9; ADR 0055): a cell that holds plasm after the diffusion gets the stamp of the step. WebGPU writes
+   the stamp into a storage buffer. WebGL2 draws into a target of unsigned integers and discards the fragment of
+   every other cell, so that cell keeps its stamp. The same pass on WebGPU, and a pass before it on WebGL2, writes
+   the front stamp of a cell that gets plasm on ground without slime (ADR 0060).
+7. **Flow passes**, only while Flow in the tubes is on (model.md, section 8; ADR 0029): `update`, then 16 `pressure`
    iterations, once per strain (ADR 0031). On WebGPU each texture of the flow has a layer per strain, and the agent and
    growth passes read the layer of the agent's strain from a `texture_2d_array`; on WebGL2 each strain has its own
    targets. On WebGPU each strain has its own uniform buffer; on WebGL2 one uniform buffer holds the block of one strain
@@ -177,6 +198,12 @@ these passes (`encodeStep` in `src/engine/sim.ts` and `src/engine/gl/sim.ts`):
    (`flowMemoryOf()`); a strain that the settings do not hold gets the memory of strain A, which no agent reads. The
    lines of the flow in `agents.wgsl` and `growth.wgsl` stand between `//#if FLOW` markers; a pass without the flow
    compiles from the source without them (`shaders/variant.ts`), so it keeps its bytes.
+8. **The territory passes**, only while the rules of stage 4 run (model.md, section 6.10; ADR 0068): after the growth
+   passes the owners (WebGPU: `atomicOr` by each agent; WebGL2: one point per agent into an `R8UI` target, without
+   blending), and after the flow the push into the other copy of the territory (WebGPU: one invocation per texel of 4
+   cells; WebGL2: one fragment per cell). Its constants ride in the uniform block of the flow, after the sites. The
+   lines of the territory in `agents.wgsl` and `growth.wgsl` stand between `//#if TERRITORY` markers and come only
+   with those of the flow.
 
 The whole step is deterministic on one GPU: integer atomics make the deposit order-independent. Every 32 steps a
 counting sort by 8 × 8 tiles reorders the agents into the second buffer, so agents near each other on the grid run
@@ -200,7 +227,8 @@ periodic grid over all its cells.
 | Environment         | food strength, light strength (Jones: repellent strength), covered food, random shrinkage; extended: diffusion passes                        |
 | Growth              | growth and shrinkage (Jones 2011) with Gf, Gw, Gmin, Gmax, Sf, Sw, Smin, Smax; capacity                                                      |
 | Flow                | flow in the tubes, flow strength, draw the tubes by their flow (extended model only)                                                         |
-| Tools               | pan/zoom, inoculate (dead agents of a strain), food, light (Jones: repellent), wall, erase, cut, electrode; brush; lines (Shift)             |
+| Slime               | slime life time, show slime, show growth front (extended model only)                                                                         |
+| Tools               | pan/zoom, inoculate (dead agents of a strain), food, light (Jones: repellent), wall, erase, cut, electrode, slime; brush; lines (Shift)      |
 | Look                | style (glow, gel relief, paper, agents), gel color (mild, strong), exposure (auto), bloom, speed (steps per second); scent view (toolbar, S) |
 | Learn               | what Physarum is, Jones 2010 and the six sub-steps, parameter help, every scene with its source and settings                                 |
 | Share               | the page address as a link: settings, scene and the drawing (ADR 0021, ADR 0047); PNG export                                                 |
@@ -220,12 +248,12 @@ its edges (ADR 0026). Cut moves the agents of its wound to open cells outside it
 painted onto agents moves them off it (ADR 0038). While growth runs, both kill these agents
 instead, and growth fills the wound from its margin (model.md, section 7.1; ADR 0039).
 
-With Shift held, the brush tools Food, Light, Wall, Erase and Electrode draw straight lines (ADR 0035): a click sets the start,
+With Shift held, the brush tools Food, Light, Wall, Erase, Electrode and Slime draw straight lines (ADR 0035): a click sets the start,
 and the next click paints the line from it as one stroke, as wide as the brush. The end of a line is the start of the
 next while Shift is held. A preview over the canvas shows the line until the second click. Escape, letting go of
 Shift, a click without Shift or another tool ends a start that waits. The agent tools ignore Shift.
 
-Keyboard: Space pause, `.` step, R reset, 1–8 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn,
+Keyboard: Space pause, `.` step, R reset, 1–9 tools, `[`/`]` brush size, F fit view, S scent view, H hide UI, L Learn,
 Shift and two clicks a straight line, Escape ends it.
 A key is a shortcut unless the focused element uses it: a field takes every key, a button Space and Enter, a slider
 the arrows.
@@ -234,7 +262,8 @@ the arrows.
 
 - The view fits the grid into the canvas, centred. Beside a closed arena the free space shows a
   dark background; around a periodic lattice its copies show at 0.15 of their light, so a tool
-  on a copy paints where the copy shows it (ADR 0026). A grid shaped like the screen shows its
+  on a copy paints where the copy shows it (ADR 0026). The light is that which the screen shows:
+  a highlight of the gel ends at 1 first (ADR 0060). A grid shaped like the screen shows its
   copies as they are when zoomed out.
 - Zoomed out, above 1 cell per pixel, a pixel shows the mean of the trail over its square: from the
   trail itself up to 2 cells per pixel, above from a coarser map of the mean over 2, 4, 8 or 16 cells
@@ -248,7 +277,20 @@ the arrows.
 - Linear-light compositing: radiance `L = Σ trail_s · gain · color_s`, then tone mapping,
   then sRGB encoding. Overlaps turn white-hot instead of clipping.
 - **Auto levels**: black at the 65th, white at the 99th percentile of a GPU histogram, smoothed
-  (the GPU version of Fogleman's percentile levels; tuning evidence in ADR 0009).
+  (the GPU version of Fogleman's percentile levels; tuning evidence in ADR 0009). With one agent per cell the agents
+  are the plasm, and the black level is at most half of the median trail of the cells that hold an agent: at the edge
+  of a band of plasm the trail is half of the trail inside it, so a higher black level would draw plasm black
+  (ADR 0062). Where the plasm covers more than 35 % of the grid, the 65th percentile alone tore it. The white level is
+  never below the median trail of the cells that hold an agent, or without the rule of the cells that an agent moved
+  into in the step, and the strand of the scent view stands on the same floor (ADR 0090). A colony on less than 1 % of
+  the grid puts the 99th percentile on the faint trail that the diffusion spreads around it, and the picture drew its
+  plasm as a blob. The frames reach the floor at once, not by the smoothing, and they measure in every frame while the
+  floor sets the white level; such a measurement between two turns only holds the floor. While the trail under a new
+  colony builds up, from a measurement without a floor to the first whose floor does not rise, the frames take each
+  measurement as if its floor were the floor grown once more by its last rise: that trail grows by up to 2.6 times
+  from frame to frame, and a measurement reaches the frames one frame late (ADR 0094). The fixed gain from the density
+  is the gain of the frames until the first measurement, and no limit after it. WebGL2 reads the agents of the block of cells of each sample, so a small colony between its
+  samples counts too, and its frames start from the fixed gain as those of WebGPU do.
 - Bloom: thresholded, normalised mip chain on a half-resolution `rgba16float` target.
 - Gel relief style: the trail as a wet gel on dark agar. A thick tube is higher than a thin one, has the full colour
   of its strain and hides the ground. Thin gel is pale and clear, a little with the mild gel color and much with the
@@ -261,6 +303,14 @@ the arrows.
   on up to them. In collision mode, agents sitting on food are drawn as trail at a fixed level
   (a blocked agent deposits nothing, Jones 2010, p. 133), and the agents style also shows the agents that
   stayed put. Without anything painted the render pass runs without this code.
+- Electrodes (ADR 0047, ADR 0058): a pole is a stud that lies over everything else, the cathode blue and the anode
+  red in every style. Its outline is rebuilt from the distances in `poles` with the spline of food and walls, with
+  one pixel of anti-aliasing at any zoom, and every cell centre lies on the side of the outline that `env` holds. A
+  dome rises over the outer 1.5 cells to a flat top. It is lit like the walls, with a highlight, a dark line along the
+  outline (1.5 pixels wide, at least 0.35 and at most 0.75 cells) and a shadow of 2 cells on the side away from the
+  light, as dark as the shadow of a wall. A pole covers all of what lies below it. Where two poles meet, each covers
+  its share of a pixel. A frame without a pole reads no byte of `poles` and draws the pixels of before. A CPU copy is
+  `studAt()` and `electrodesOver()` in `src/engine/electrode-reference.ts`.
 - Scent view (ADR 0009, amendment and revision of 2026-11-11): a switch of the look draws the food scent as a green
   glow and the repellent (light; in the Jones model a repellent source, ADR 0044) as a pink glow over the picture, below the oat flake and the
   walls. The glow rises with log10 of the scent from 0 at 0.01 to its top at 10,000, on a fixed scale, so scenes and
@@ -284,10 +334,98 @@ the arrows.
   glow, the auto levels, the coarse map of the trail and PNG read the picture in place of the trail; the strand of
   the scent view stays a level of the trail of the model; the agents style has no picture of the tubes. A third pass
   writes the stream of the plasm per cell: the direction of the flux of the lane with the largest flux, times its
-  speed, which is the flux over the root of the conductivity of the cell, over 2 and at most 1. The render pass
+  speed, which is the flux over the root of the conductivity of the cell, over 2 and at most 1. The flux runs over the
+  edges of the flow: with the flow over 8 neighbours also over the diagonal ones, with their weights, and only where
+  both cells beside a diagonal edge are open (model.md, section 8.1; ADR 0086). The render pass
   draws grains that go back and forth along the stream, 12 cells to each side in 60 steps where the speed is 1, and
-  go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The fit of the grid to the memory of the GPU counts the three textures while the flow is on, with the
-  switch on or off, so the switch never changes the grid. The simulation never reads the picture.
+  go on by 0.31 cells per step (ADR 0034, amendments of 2026-11-14). The switch changes only the tubes (ADR 0095): the
+  third pass runs once for each drawn state while the flow is on and the style draws the trail, with the switch on or
+  off (`grainsShown()` in `tubes.ts`), and without the picture the grains lie on the trail of the view. Then only the
+  third pass is built and run, and the GPU holds only its texture. The fit of the grid to the memory of the GPU counts
+  the three textures while the flow is on, with the switch on or off, so the switch never changes the grid. The
+  simulation never reads the picture or the stream. With the picture the render pass also draws the veins (ADR 0099): it reads the factors of the
+  first pass, takes the square root of the strength across the tube as a quadratic B-spline over the 3 × 3 cells
+  around a pixel, and from 0.2 to 0.7 moves the colour c of the strain up to 0.8 of the way to 0.8 · c², a deeper
+  shade; in the gel style a vein is also a low lit ridge. It needs no texture of its own.
+- Film of the slime (ADR 0055, decision 8; ADR 0057): while the model has slime, the view draws the slime as a wet film
+  on the ground, with a switch below the Slime life time that is on at the start. The flake of food, the trail, the
+  tubes, the light, the walls and the electrodes lie on the film. The slime of a cell is as thick as
+  amount / 4,095 · (1 − age / life time): the amount of slime of the cell, and the age of its stamp (model.md, section
+  6.9). The amount is high where a tube stayed and low where the colony only passed, so the film keeps the shape of
+  the tube that made it. The organism leaves the coat of slime of a tube behind in the same way, as its slime track
+  (`docs/knowledge-base/slime-mazes-and-the-front.md`, "Slime").
+  - **The map of the film** (`slimeFilm` in `render.wgsl`, `slime-film.frag`): a pass writes one texel per cell, the
+    mean of the thickness of the open cells among the 3 × 3 around the cell, with the weights 1, 2, 1 along each axis.
+    A cell is open when it lies inside the arena and holds no wall that the picture draws. So a wall and a cell
+    outside the arena take the film of the open cells beside them: the film goes on up to a wall and to the rim of
+    the dish, and it has no tooth for each cell along a slanted wall. A cell with no open cell among its 3 × 3 takes
+    the mean over the 5 × 5 in the same way, with the weights 1, 2, 3, 2, 1, because the smooth outline of a wall
+    runs through the cells of the wall. The pass runs once for each state of the slime
+    that a frame draws: after a step or a stroke, and when the life time, the arena or the walls are others.
+  - **The coarse map** (`slimeDown`, `slime-down.frag`): above 2 cells per pixel a second pass writes the mean of
+    that map over 2, 4, 8 or 16 cells per side, the levels of the trail's coarse map.
+  - **The surface** (`filmAt` and `slimed`): the render pass reads the 3 × 3 texels of the map of its level around a
+    pixel as a quadratic B-spline, the spline of food and walls. That gives the thickness and its gradient with no
+    crease, so the film has smooth edges at any zoom. The texels are fixed in the grid, so the film does not shimmer
+    when the view moves.
+  - **The look** (`SLIME_LOOK`, `SLIME_RELIEF` and `SLIME_BEAD` in `src/engine/render.ts`). The body: thin slime is
+    clear and thick slime is milky, the share thickness^1.6 of the full body. On the dark grounds the body adds a
+    pale colour to the ground: `#c4d7ce` with a share of 0.075 in the glow and agents styles, `#d7e1c8` with 0.1 in
+    the gel style. On paper the film is a wet stain: it mixes `#8f8a78` into the paper with a share of 0.22, and its
+    edge has a tide line. The light: the lamp of the walls and of the gel puts a small bright highlight and a wide
+    weak light on the surface, which is the film with a relief of 2.5 cells for the full thickness.
+  - **Two static patterns**, fixed in the grid. Waves: the thickness varies by 16 % in soft noise with a step of 12
+    cells and a quarter of a noise of twice the frequency. Beads: small round drops on thick slime, 0.7 to 2.2 cells
+    in radius, about one for 200 cells, which only catch the light. The lattice of each pattern has a whole number
+    of steps along each side of the grid, counted in whole numbers so that both backends count the same, and the
+    patterns repeat with a periodic grid. Detail that is smaller than a
+    pixel fades out from 1 cell per pixel on and is gone at 1.5.
+
+  The plasm lies on the film (ADR 0060; `plasmCover`): the film does not show through a tube, in any style. The
+  plasm hides its ground from the light 0.02 on, and all of it from 0.14 on, the levels at which the gel begins. The
+  light of the plasm is its summed trail above the black level times the exposure. So a dim tube hides the film too,
+  and the film comes back only where the light of a tube fades out at its edge.
+
+  The film has one colour for all strains. The scent view lies over the picture and hides nothing of it, so it shows
+  the film too (ADR 0060, decision 11). The switch changes nothing in the
+  simulation, goes into the link like the style and stays as it is when a scene loads. Without the film the render
+  pass draws the pixels of before at the same cost: the code of the film is compiled in only for a frame that draws
+  it. A CPU copy of the rules is in `src/engine/slime-reference.ts`.
+
+- Fan of the growth front (ADR 0060): while the model has slime and growth is on, the view draws young ground as the growth front of
+  a plasmodium, with the switch Show growth front below Show slime, on at the start. The front is the plasm that comes
+  onto ground without slime; the front stamp of a cell holds the step of that (model.md, section 6.9). The organism
+  has a sheet at its front, then fine veins in a sheet that gets thinner, then one main vein
+  (`docs/knowledge-base/slime-mazes-and-the-front.md`, "The front"). The model grows arms of full plasm, so the
+  picture adds a skirt around the young arms, a thin clear veil of slime; the tube of the model is drawn as before.
+  - **The map of the front** (`frontMap` in `render.wgsl`, `front-map.frag`): one texel for 4 × 4 cells, filled once
+    for each state. For each strain it holds the share of the texel that is young ground. A cell is young ground
+    while it has slime and a front stamp, and it counts (1 − e^(−a / 8)) · e^(−a / 150) for the age a of its stamp in
+    steps: it comes into the skirt over about 20 steps and leaves it with 150. So one cell changes the skirt by a
+    small amount in a step, and the skirt does not jump. Slime without a front stamp is old ground.
+  - **The young ground around a pixel** (`skirtAt`): the render pass takes the mean of the texels of the map within
+    2 texels of the pixel, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the distance
+    alone and ends without a step, so the young ground around a texel is a round, smooth hill at any zoom, and the
+    skirt shows no texel. The skirt begins where that mean is 0.04 and is whole from 0.3 on. It depends on the
+    stamps alone, not on the levels of the picture.
+  - **The veil** (`skirtOn`): the skirt adds a little light in the colour of the slime and of its strain, with the
+    waves of the film in its surface, a soft light and a small highlight. It only adds light, and on paper it is a
+    faint stain, so it has no dark rim. It lies on the film and below the plasm: the plasm hides it as it hides the
+    film, and the head of a tube is no thicker with it.
+  - **Walls** (`skirtOpen`): the skirt reaches up to 8 cells from young ground, more than a wall is thick. So the
+    pass walks from the pixel toward that ground, up its slope, cell by cell, and the skirt shows nothing where a
+    wall lies on the way.
+  - The skirt adds nothing to the trail and nothing to the gel. The agents style draws no skirt, and the scent view
+    lies over it as over the film. The code of the skirt is compiled in only for a frame that draws it, in pipelines
+    of its own that also hold the film: a frame without the skirt runs the shader without it. The switch changes
+    nothing in the simulation, goes into the link like the style and stays as it is when a scene loads. The numbers
+    are the constants `SKIRT_…` of `render.wgsl`, `render.frag` and `view.glsl`: choices made on pictures.
+  - The picture draws no veins. The first build drew a net of veins from a pattern; the owner took it out on
+    2026-11-18, because veins must come from the crown at the head of a tube, which the model does not grow yet
+    (ADR 0060, decision 14; stage 4 in `TODO.md`).
+- The gel reads its height as a quadratic B-spline of the cells while the view shows a cell on a pixel or more
+  (`heightSmooth`, ADR 0060): four bilinear lookups in place of one. The line at which the gel ends has no tooth at
+  the edge of a cell.
 - Each strain has a colour of its own, a setting of its card; a new strain takes the next of the four colours of
   `PALETTE` (`src/model/params.ts`). Each style has a fixed background (`BACKGROUND` in `src/engine/render.ts`).
 - Dither before 8-bit output against banding. An HDR canvas is not built (`TODO.md`).

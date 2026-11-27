@@ -2,8 +2,8 @@
 // tubes.gpu.test.ts checks both backends against it. tubes.ts states the rule.
 import type { Boundary } from '../model/params';
 import { dishRadius } from './brush';
-import { FLOW } from './flow';
-import { STREAM, TUBES, TUBE_REACH, TUBE_WINDOW } from './tubes';
+import { FLOW, FLOW_EIGHT } from './flow';
+import { STREAM, TUBES, TUBE_REACH, TUBE_WINDOW, VEINS } from './tubes';
 
 /** The grid as the passes see it: 4 bytes per cell as Sim.readShape() returns them (the first is the wall byte). */
 export interface TubeGrid {
@@ -97,6 +97,32 @@ export function tubeRoots(grid: TubeGrid, memories: readonly Float32Array[]): Fl
 }
 
 /**
+ * The veins at the point (px, py) of the grid, in cells (tubes.ts, point 7; `veinsAt` in render.wgsl): per strain how
+ * far its colour goes to the deep shade, 0 to VEINS.deep. `roots`: the result of tubeRoots(). A cell outside the arena
+ * holds no vein.
+ */
+export function veinDeep(grid: TubeGrid, roots: Float32Array, px: number, py: number): number[] {
+  const spline = (u: number) => [0.5 * (0.5 - u) * (0.5 - u), 0.75 - u * u, 0.5 * (0.5 + u) * (0.5 + u)];
+  const [cx, cy] = [Math.floor(px), Math.floor(py)];
+  const [wx, wy] = [spline(px - 0.5 - cx), spline(py - 0.5 - cy)];
+  return [0, 1, 2, 3].map((s) => {
+    let sum = 0;
+    for (let j = 0; j < 3; j++)
+      for (let i = 0; i < 3; i++) {
+        const q = arenaCell(grid, cx + i - 1, cy + j - 1);
+        if (q >= 0) sum += (wx[i] ?? 0) * (wy[j] ?? 0) * (roots[q * 4 + s] ?? 0) ** 4;
+      }
+    const t = Math.min(1, Math.max(0, (Math.sqrt(sum) - VEINS.low) / (VEINS.high - VEINS.low)));
+    return VEINS.deep * t * t * (3 - 2 * t);
+  });
+}
+
+/** The colour of a strain (linear RGB) where it goes `deep` of the way to the deep shade (veinDeep()). */
+export function veinShade(color: readonly number[], deep: number): number[] {
+  return color.map((c) => c + (VEINS.dark * c * c - c) * deep);
+}
+
+/**
  * The pass `picture`: the trail that the view draws, 4 lanes per cell. `trail`: the trail of the view without the
  * tubes (Sim.readView()); `roots`: the result of tubeRoots().
  */
@@ -151,20 +177,37 @@ const NEIGHBOURS = [
   [0, -1],
 ] as const;
 
+/** The four diagonal neighbours of a cell over 8 neighbours (ADR 0086): south-east, south-west, north-east, north-west. */
+const DIAGONALS = [
+  [1, 1],
+  [-1, 1],
+  [1, -1],
+  [-1, -1],
+] as const;
+
+/** The weights of the edges over 8 neighbours as the passes hold them, float32 (AXIS and DIAG in tubes.wgsl). */
+const [AXIS, DIAG] = [Math.fround(FLOW_EIGHT.axis), Math.fround(FLOW_EIGHT.diag)];
+
 /**
  * The stream of the plasm (tubes.ts, point 6; `stream` in tubes.wgsl): per cell the direction of the flow of the
  * plasm times its speed, 4 values per cell (x, y, 0, 0). `memories` and `pressures`: per strain 4 values per cell, as
  * Sim.readFlow() and Sim.readPressure() return them. The sums are 32-bit floats, as on the GPU, so the same lane has
- * the largest flux.
+ * the largest flux. `eight`: over 8 neighbours (ADR 0086), as the flow then runs: the axis edges with the weight AXIS,
+ * and the diagonal edges with DIAG where both cells beside the edge are open (in the arena and no cell of a wall).
  */
 export function tubeStream(
   grid: TubeGrid,
   memories: readonly Float32Array[],
   pressures: readonly Float32Array[],
+  eight = false,
 ): Float32Array {
   const { width: w, height: h } = grid;
   const f = Math.fround;
   const out = new Float32Array(w * h * 4);
+  const open = (qx: number, qy: number) => {
+    const q = arenaCell(grid, qx, qy);
+    return q >= 0 && wallByte(grid, q) < WALL_BYTE;
+  };
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const c = arenaCell(grid, x, y);
@@ -187,6 +230,26 @@ export function tubeStream(
             flux[lane] = (flux[lane] ?? 0) + Math.abs(leaves);
             alongX[lane] = (alongX[lane] ?? 0) + ox * leaves;
             alongY[lane] = (alongY[lane] ?? 0) + oy * leaves;
+          }
+        }
+        if (eight) {
+          for (let lane = 0; lane < 4; lane++) {
+            flux[lane] = AXIS * (flux[lane] ?? 0);
+            alongX[lane] = AXIS * (alongX[lane] ?? 0);
+            alongY[lane] = AXIS * (alongY[lane] ?? 0);
+          }
+          for (const [ox, oy] of DIAGONALS) {
+            if (!open(x + ox, y) || !open(x, y + oy)) continue;
+            const n = arenaCell(grid, x + ox, y + oy);
+            const gn = n < 0 ? 0 : (memory[n * 4 + 2] ?? 0);
+            if (gn <= 0) continue;
+            const edge = f(DIAG * f(f(f(2 * g) * gn) / f(g + gn)));
+            for (let lane = 0; lane < 4; lane++) {
+              const leaves = f(edge * f((pressure[c * 4 + lane] ?? 0) - (pressure[n * 4 + lane] ?? 0)));
+              flux[lane] = (flux[lane] ?? 0) + Math.abs(leaves);
+              alongX[lane] = (alongX[lane] ?? 0) + ox * leaves;
+              alongY[lane] = (alongY[lane] ?? 0) + oy * leaves;
+            }
           }
         }
         let lane = 0;

@@ -40,12 +40,15 @@ jobs:
         with:
           path: dist
 
-  # The tests run in four jobs at the same time, so each stays well inside its limit on a slow runner
+  # The tests run in eight jobs at the same time, so each stays well inside its limit on a slow runner
   # (2026-11-11: GPU project 609 s and e2e suite 1,100 s in one job ran into its 30 min; 2026-11-12:
-  # GPU 10 to 25 min and e2e 14 to 30 min in a job each, owner decision to split both, ADR 0014).
-  # The GPU tests split by the backend in their names: one part runs every test whose full name holds
-  # "webgpu", the other every other test, so each test runs exactly once. The files of the GPU project
-  # already run at the same time, and one file took 21 of the 21 min, so a split by file would not help.
+  # GPU 10 to 25 min and e2e 14 to 30 min in a job each, owner decision to split both, ADR 0014;
+  # 2026-11-18: four parts of each, ADR 0061).
+  # The GPU tests split by the backend in their names: one half runs every test whose full name holds
+  # "webgpu", the other every other test. Each half splits by the file again: src/engine/sim.gpu.test.ts,
+  # which takes a third of the time, and the other files (ADR 0061). So each test runs exactly once. With two
+  # parts each took 20.5 to 28.7 min of its 30 on main. In CI the files of the GPU project run one after
+  # the other (vitest.config.ts).
   verify-gpu:
     name: verify-gpu (${{ matrix.part }})
     runs-on: ubuntu-26.04
@@ -54,10 +57,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - part: webgpu
+          - part: webgpu-sim
             tests: webgpu
+            only: src/engine/sim.gpu.test.ts
+          - part: webgpu-rest
+            tests: webgpu
+            exclude: src/engine/sim.gpu.test.ts
+          - part: rest-sim
+            tests: ^(?!.*webgpu)
+            only: src/engine/sim.gpu.test.ts
           - part: rest
             tests: ^(?!.*webgpu)
+            exclude: src/engine/sim.gpu.test.ts
     # Chromium and its system packages come with the image, so a run needs no Ubuntu mirror (2026-11-11:
     # the runners could not resolve archive.ubuntu.com for 45 min). The image's Playwright version must
     # equal @playwright/test in package.json; Renovate updates both in one pull request (ADR 0014).
@@ -81,9 +92,11 @@ jobs:
         run: npm run check
       - if: matrix.part == 'rest'
         run: npm test
-      - run: npm run test:gpu -- --testNamePattern "$TESTS"
+      - run: npm run test:gpu -- --testNamePattern "$TESTS" ${ONLY:+"$ONLY"} ${EXCLUDE:+--exclude "$EXCLUDE"}
         env:
           TESTS: ${{ matrix.tests }}
+          ONLY: ${{ matrix.only }}
+          EXCLUDE: ${{ matrix.exclude }}
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -91,16 +104,18 @@ jobs:
           path: .vitest/attachments/
           retention-days: 7
 
-  # Playwright shares the e2e tests out by test (fullyParallel in playwright.config.ts).
+  # Playwright shares the e2e tests out by test (fullyParallel in playwright.config.ts). Four shards: with two, the
+  # second took 24.8 to 28.3 min of its 30 on main (ADR 0061). The list of the matrix is the one place that holds the
+  # number of shards.
   verify-e2e:
-    name: verify-e2e (${{ matrix.shard }}/2)
+    name: verify-e2e (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: build
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     # Chromium and its system packages come with the image, so a run needs no Ubuntu mirror (2026-11-11:
     # the runners could not resolve archive.ubuntu.com for 45 min). The image's Playwright version must
     # equal @playwright/test in package.json; Renovate updates both in one pull request (ADR 0014).
@@ -125,9 +140,10 @@ jobs:
           path: ${{ runner.temp }}/site
       - name: Unpack the built site (e2e tests run against the files that deploy publishes)
         run: mkdir dist && tar -xf "$RUNNER_TEMP/site/artifact.tar" -C dist
-      - run: npm run test:e2e -- --shard="$SHARD/2"
+      - run: npm run test:e2e -- --shard="$SHARD/$SHARDS"
         env:
           SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

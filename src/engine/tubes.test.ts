@@ -1,9 +1,9 @@
 // The rule of the picture of the tubes (ADR 0034) on the CPU: the numbers of tubes.ts and the reference that
 // tubes.gpu.test.ts holds both backends to.
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, tubeViewHelp, type Settings } from '../model/params';
+import { defaultSettings, flowHelp, tubeViewHelp, type Settings } from '../model/params';
 import { FLOW } from './flow';
-import { STREAM, TUBE_REACH, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
+import { grainsShown, STREAM, TUBE_REACH, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
 import { arenaCell, tubePicture, tubeRoots, tubeStream, wallByte, wallOnLine, type TubeGrid } from './tubes-reference';
 import { SHAPE_RANGE } from './types';
 
@@ -49,6 +49,24 @@ describe('the picture of the tubes', () => {
     for (const style of ['glow', 'gel', 'paper'] as const) expect(tubesShown({ ...on, style })).toBe(true);
   });
 
+  it('has grains with the flow and a style that draws the trail, with the switch of the picture on or off', () => {
+    // ADR 0095: the switch changes only the tubes. Without it the grains move over the trail of the view.
+    for (const showTubes of [true, false]) {
+      const on: Settings = { ...defaultSettings(), model: 'extended', flow: true, showTubes };
+      expect(grainsShown(on), String(showTubes)).toBe(true);
+      expect(grainsShown({ ...on, flow: false })).toBe(false);
+      expect(grainsShown({ ...on, model: 'jones' })).toBe(false);
+      expect(grainsShown({ ...on, style: 'agents' })).toBe(false);
+      for (const style of ['glow', 'gel', 'paper'] as const) expect(grainsShown({ ...on, style })).toBe(true);
+      // Wherever the picture of the tubes is drawn, the grains are drawn too.
+      for (const style of ['glow', 'gel', 'paper', 'agents'] as const)
+        for (const flow of [true, false]) {
+          const s: Settings = { ...on, style, flow };
+          if (tubesShown(s)) expect(grainsShown(s), `${style} ${String(flow)}`).toBe(true);
+        }
+    }
+  });
+
   it('reaches 4 cells, so a pass looks at the 7 × 7 cells around a cell', () => {
     expect(TUBE_REACH).toBe(TUBES.radius + TUBES.edge / 2);
     expect(TUBE_REACH).toBe(4);
@@ -62,7 +80,12 @@ describe('the picture of the tubes', () => {
     expect(TUBES.sheet).toBe(0.25);
     expect(tubeViewHelp.help).toContain('a quarter of its brightness');
     expect(tubeViewHelp.help).toContain('fourth root');
-    expect(tubeViewHelp.help).toContain('grains move in each tube with the flow');
+    // The grains are in the help of the flow, and the switch says that it leaves them (ADR 0095).
+    expect(flowHelp.help).toContain('grains move in each tube with the flow');
+    expect(flowHelp.help).toContain('The grains show with Draw the tubes by their flow on or off');
+    expect(tubeViewHelp.help).toContain('Changes only the tubes in the picture');
+    expect(tubeViewHelp.help).toContain('they show with the switch on or off');
+    expect(tubeViewHelp.help).not.toContain('grains move in each tube');
   });
 
   it('takes the strength across a tube from the 3 × 3 cells around a cell with a tube, and its fourth root', () => {

@@ -2,8 +2,30 @@ import type { Boundary, Settings } from '../model/params';
 import type { AgentTool } from './pack';
 import type { FlowSites } from './sites';
 
-export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3, anode: 4, cathode: 5 } as const;
+/**
+ * The kinds of an edit, with the number that the paint passes and a link give each. Every kind but `start` is a tool.
+ * A `start` is the start spot of a scene (ADR 0066): an edit of the list that paints nothing, where the start layout
+ * Food places the colony of a strain in place of its food (Engine.seedAtFood()).
+ */
+export const EnvKind = { erase: 0, wall: 1, food: 2, light: 3, anode: 4, cathode: 5, slime: 6, start: 7 } as const;
 export type EnvTool = keyof typeof EnvKind;
+
+/**
+ * Whether a stroke of `kind` changes the environment and its outlines. A stroke of the Slime tool changes neither: it
+ * writes only into the slime field (ADR 0055, decision 7). A start spot changes nothing (ADR 0066).
+ */
+export const paintsEnv = (kind: EnvTool) => kind !== 'slime' && kind !== 'start';
+/**
+ * Whether a stroke of `kind` changes the slime field (ADR 0055, decision 7). The Slime tool gives the open cells of its
+ * stroke the stamp of the current step. An erase and a wall clear the stamp of their cells. Every other kind leaves the
+ * field as it is.
+ */
+export const changesSlime = (kind: EnvTool) => kind === 'slime' || kind === 'erase' || kind === 'wall';
+/**
+ * Whether a stroke of `kind` paints anything: the environment or the slime field. Every kind but a start spot does
+ * (ADR 0066). The engine gives a simulation only the strokes that paint, and the sweep judges only those.
+ */
+export const paints = (kind: EnvTool) => paintsEnv(kind) || changesSlime(kind);
 
 /**
  * The two poles of the Electrode tool (ADR 0047), as Tsuda, Jones et al. 2011 (p. 10) model a current: the cathode is
@@ -13,11 +35,19 @@ export type EnvTool = keyof typeof EnvKind;
 export const POLES = ['cathode', 'anode'] as const;
 export type Pole = (typeof POLES)[number];
 export const isPole = (kind: EnvTool): kind is Pole => kind === 'anode' || kind === 'cathode';
+/**
+ * Whether a stroke of `kind` changes the outline distances of the electrodes (Sim.readPoles(), ADR 0058). A pole
+ * unites with the outline of its kind and takes its cells from the other pole. An erase and a wall clear both poles of
+ * their cells: only where a pole may lie in the environment (`poled`, Sim.hasElectrodes). Food, light and slime leave
+ * the poles.
+ */
+export const polesOutlined = (kind: EnvTool, poled: boolean) =>
+  isPole(kind) || (poled && (kind === 'erase' || kind === 'wall'));
 /** Whether a stroke of `kind` paints cells that release into the scent: food, light and the electrodes. */
 export const releases = (kind: EnvTool) => kind === 'food' || kind === 'light' || isPole(kind);
 /**
  * The byte of each pole (paint.wgsl, paint.frag): 0 is no electrode. The passes read a byte above 191 as the cathode
- * and any other byte above 0 as the anode (diffuse.wgsl `sources`, render.wgsl `poleAt`).
+ * and any other byte above 0 as the anode (diffuse.wgsl `sources`, paint.wgsl `layersOf`).
  */
 export const POLE_BYTE = { anode: 128, cathode: 255 } as const;
 
@@ -77,8 +107,20 @@ export interface Sim {
    * less in the frame. The sort changes no result (ADR 0005).
    */
   sortNow?(): void;
-  /** Paints brush strokes in order: the only way food, light, walls and electrodes reach a simulation. */
+  /**
+   * Paints brush strokes in order: the only way food, light, walls, electrodes and painted slime reach a simulation.
+   * Each stroke changes the environment first, and then the slime field as paintSlime() does.
+   */
   paint(strokes: readonly Stroke[]): void;
+  /**
+   * Paints only what the strokes do with the slime field (ADR 0055, decision 7), in their order: a stroke of the Slime
+   * tool gives each open cell of its footprint the stamp of the current step, an erase and a wall clear the stamp of
+   * their cells, and every other kind does nothing. The footprint of a slime stroke is the one of a food stroke. A cell
+   * is open when it lies inside the arena of the simulation and holds no wall. The environment stays as it is. The
+   * engine calls this after a reset, which clears every stamp. Nothing in the Jones model, which has no slime.
+   */
+  paintSlime(strokes: readonly Stroke[]): void;
+  /** Removes food, light, walls and electrodes, and clears every stamp of the slime field (ADR 0055, decision 7). */
   clearEnvironment(): void;
   /**
    * The food sites on this grid, each one a food stroke with its cells: the sites that give and take the flux of the
@@ -128,13 +170,82 @@ export interface Sim {
    */
   readFlow(strain?: number): Promise<Float32Array>;
   readPressure(strain?: number): Promise<Float32Array>;
+  /**
+   * For tests and measurements: the slime field (ADR 0055), one value per cell, rows from y = 0: 0 for a cell without
+   * a stamp, else the number of the step in which the cell last held plasm, plus 1 (slime.ts). A cell that the Slime
+   * tool painted since then holds `step` of the time of the stroke, plus 1: the number of the step that ran next. Only
+   * zeros in the Jones model, which has no slime.
+   */
+  readSlime(): Promise<Uint32Array>;
+  /**
+   * For tests and measurements: the amount of slime of every cell (ADR 0057), one value per cell, rows from y = 0: a
+   * whole number from 0 to SLIME_FULL (slime.ts). The picture alone reads it. Only zeros in the Jones model, which has
+   * no slime.
+   */
+  readSlimeAmount(): Promise<Uint32Array>;
+  /**
+   * For tests and measurements: the front stamp of every cell (ADR 0060), one value per cell, rows from y = 0: the
+   * step, plus 1, at which the growth front reached the cell, which is the step in which plasm came onto the cell
+   * while it had no slime. It has a meaning only in a cell that has slime; 0 there is slime that no front reached
+   * (painted slime). Only zeros in the Jones model, which has no slime.
+   */
+  readSlimeFront(): Promise<Uint32Array>;
+  /**
+   * The start territory (ADR 0067, decision 4; ADR 0068): every open cell whose centre lies within `radius` cells of
+   * (x, y), on the periodic grid of the nearest copy, joins the territory of `strain`. Nothing while the rules of stage 4
+   * do not run (territory.ts territoryOn()).
+   */
+  addTerritory(strain: number, x: number, y: number, radius: number): void;
+  /**
+   * For tests and measurements: the territory of every strain (ADR 0068), one byte per cell, rows from y = 0, with
+   * bit s set while the cell lies in the territory of strain s. Only zeros while the rules of stage 4 do not run.
+   */
+  readTerritory(): Promise<Uint8Array>;
+  /**
+   * For tests: the owners of the last step (ADR 0068), one byte per cell as readTerritory() gives the territory: bit s
+   * for an alive agent of strain s in the cell after the moves and the births. Only zeros before the first step and
+   * while the rules of stage 4 do not run.
+   */
+  readOwners(): Promise<Uint8Array>;
+  /** For tests: replaces the territory, one byte per cell as readTerritory() returns it, while the rules run. */
+  writeTerritory(data: Uint8Array): void;
+  /**
+   * For tests: the sink rate of every cell for a strain (ADR 0069), one float per cell, rows from y = 0, with a minus
+   * sign where the cell was a sink of the strain in the last step. Only zeros while the rules of stage 4 do not run,
+   * and for a strain that the settings do not hold.
+   */
+  readSinks(strain?: number): Promise<Float32Array>;
+  /**
+   * For tests: the sums of each strain of the last step (ADR 0069), 4 words per strain: R in steps of 2^-16 as a low
+   * and a high word, C and N (sinks.ts SINK_SUM_WORDS). Only zeros while the rules of stage 4 do not run.
+   */
+  readSinkSums(): Promise<Uint32Array>;
+  /** For tests: the state of each strain of the last step (ADR 0069), sinks.ts SINK_STATE_LANES floats per strain. */
+  readSinkState(): Promise<Float32Array>;
+  /**
+   * For tests: replaces the state of each strain, SINK_STATE_LANES floats per strain as readSinkState() returns them,
+   * while the rules of stage 4 run. The budget of the paid births lies in lane paid.ts BUDGET_LANE (ADR 0071).
+   */
+  writeSinkState(data: Float32Array): void;
+  /**
+   * For tests: the keys of the births that the flux pays of the last growth step (ADR 0071), one float per agent by its
+   * id: paid.ts NO_KEY for an agent without a key. Empty while the rules of stage 4 do not run.
+   */
+  readPaidKeys(): Promise<Float32Array>;
+  /**
+   * For tests: the counts of the last step that settle the budget (ADR 0100), paid.ts PAID_COUNT_LANES whole numbers
+   * per strain in the order of paid.ts PAID_COUNTS. Only zeros while the rules of stage 4 do not run.
+   */
+  readPaidCounts(): Promise<Uint32Array>;
+  /** For tests: replaces the sink rates of a strain, one float per cell as readSinks() returns them, while the rules run. */
+  writeSinks(data: Float32Array, strain?: number): void;
   /** For tests: replaces the memory of the flow of a strain, 4 values per cell as readFlow() returns them. */
   writeFlow(data: Float32Array, strain?: number): void;
   /** For tests: replaces the pressure of the flow of a strain, 4 lanes per cell as readPressure() returns them. */
   writePressure(data: Float32Array, strain?: number): void;
   /**
-   * For tests: the stream of the plasm in the picture of the tubes, 4 values per cell (x, y, 0, 0); empty without
-   * that picture (tubes.ts, point 6).
+   * For tests: the stream of the plasm that the grains follow, 4 values per cell (x, y, 0, 0); empty while the view
+   * draws no grains (tubes.ts grainsShown()), with the picture of the tubes or without it.
    */
   readStream(): Promise<Float32Array>;
   /** Wall, food, light, electrode per cell (0–255; the electrode byte is POLE_BYTE). */
@@ -144,6 +255,12 @@ export interface Sim {
    * ±SHAPE_RANGE cells at 0 and 255), the light as in `readEnv()`, and the drop shadow of the walls (0–255).
    */
   readShape(): Promise<Uint8Array>;
+  /**
+   * For the renderer: the signed distance to the outline of the cathodes and to the outline of the anodes, in the
+   * first two bytes of a cell and in the format of readShape(); the other two bytes are 0. Only zeros while no
+   * electrode may lie in the environment (`hasElectrodes`).
+   */
+  readPoles(): Promise<Uint8Array>;
   /** False until something other than the eraser is painted after the last clear of the environment. */
   readonly hasEnvironment: boolean;
   /** False until an electrode is painted after the last clear of the environment (ADR 0047): the view then draws them. */
@@ -193,6 +310,16 @@ export interface Backend<S extends Sim = Sim> {
    * backend holds (sizing.ts TUBE_MAP_BYTES_PER_CELL_GL); 0 on a backend that holds none.
    */
   readonly tubeMapBytesPerCell: number;
+  /**
+   * More GPU bytes per grid cell and strain while the rules of stage 4 run, for the sinks (sizing.ts
+   * SINK_BYTES_PER_CELL, SINK_BYTES_PER_CELL_GL).
+   */
+  readonly sinkBytesPerCell: number;
+  /**
+   * More GPU bytes per grid cell while the rules of stage 4 run, for what the sensors read of the flow of every strain
+   * at once (sizing.ts DRIFT_BYTES_PER_CELL_GL); 0 on a backend that counts it per strain in `sinkBytesPerCell`.
+   */
+  readonly driftBytesPerCell: number;
   readonly supportsCollisions: boolean;
   /** Resolves with a message if the device or context is lost. */
   readonly lost: Promise<string>;
@@ -209,7 +336,8 @@ export interface Backend<S extends Sim = Sim> {
   createSim(settings: Settings, width: number, height: number, agents: number, start?: number): Promise<S>;
   /**
    * Draws a frame; `measure` lets auto levels sample the trail. False while a part of the picture is still being
-   * built, as the scent view's pipelines at its first frames: the same call then draws another picture later.
+   * built, as the pipelines of the scent view or of the film of the slime at their first frames: the same call then
+   * draws another picture later.
    */
   draw(sim: S, settings: Settings, view: View, measure: boolean): boolean;
   /** `levels`: levels for this picture alone (measured()), in place of those of the frames. */

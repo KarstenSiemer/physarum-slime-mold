@@ -1,8 +1,9 @@
-import type { Boundary, Settings } from '../../model/params';
+import { BOUNDARIES, type Boundary, type Settings } from '../../model/params';
 import { at } from '../at';
 import { outlineRects, paintSegments, PendingOutlines, scissorRects, unionRects, type Rect } from '../brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from '../flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowEight, flowOn, flowStrains, packFlow } from '../flow';
 import { NO_CELL, NO_SITES, SITE_BLOCK, type FlowSites } from '../sites';
+import { slimeModel, slimeSteps } from '../slime';
 import {
   CLEAR_TILE,
   growthOn,
@@ -14,16 +15,34 @@ import {
   trailSaturation,
   type AgentTool,
 } from '../pack';
-import { diffusePlanOf, viewTrailOn } from '../sizing';
-import { TUBE_TILE, tubesShown } from '../tubes';
-import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type EnvTool, type Sim, type Stroke } from '../types';
+import { PAID_COUNT_LANES, PAID_COUNTS } from '../paid';
+import { SINK_STATE_LANES, SINK_SUM_WORDS } from '../sinks';
+import { diffusePlanOf, sinkLevels, viewTrailOn } from '../sizing';
+import { packTerritory, territoryOn } from '../territory';
+import { grainsShown, TUBE_TILE, tubesShown } from '../tubes';
+import {
+  changesSlime,
+  EnvKind,
+  isPole,
+  paintsEnv,
+  polesOutlined,
+  releases,
+  SHAPE_RANGE,
+  type AgentState,
+  type EnvTool,
+  type Sim,
+  type Stroke,
+} from '../types';
 import {
   allOrNothing,
   clear,
+  clearUint,
   destroyTarget,
   fence,
   readTarget,
   readTargetAsync,
+  readUint4Target,
+  readUintTarget,
   stencilTarget,
   target,
   textures,
@@ -86,6 +105,32 @@ interface GlGrowth {
   dead: Pyramid;
 }
 
+/**
+ * The sinks of each strain (ADR 0069; sinks.frag; `sinks` in ../sim.ts), while the rules of stage 4 run: per strain the
+ * sink rates in two targets (R32F) that PASS 0 writes in turn, and the levels of the pyramid of its sums (RGBA32UI,
+ * sizing.ts sinkLevels()), whose top of one texel holds them; the state of every strain in two targets (RGBA32F, 2
+ * texels per strain) that PASS 3 writes in turn. The births that the flux pays (ADR 0071; ADR 0067, decision 7): the
+ * key of every agent (R32F, a texel per agent slot), which the test of growth writes as a second target, and the
+ * counts of a step (RGBA32F, PAID_COUNT_LANES × 1 texels, a lane per strain; paid.ts PAID_COUNTS), which paid.vert adds
+ * (ADR 0100).
+ */
+interface GlSinks {
+  /** The strains of the settings that the targets were made for. */
+  strains: number;
+  rates: Pair<Target>[];
+  levels: Target[][];
+  state: Pair<Target>;
+  keys: Target;
+  counts: Target;
+  /**
+   * What the sensors read of the flow of each strain (ADR 0075), lane s for strain s, which PASS 5 of flow.frag writes
+   * at the start of a step: the mean pressure of the four lanes, and what the sink of each cell takes over the
+   * conductivity of the cell.
+   */
+  pressures: Target;
+  takes: Target;
+}
+
 /** The layout of a pyramid over `n` elements, `width` texels a row (Pyramid). */
 function pyramidLayout(n: number, width: number) {
   const sizes = [n, ...pyramidLevels(n)];
@@ -100,8 +145,51 @@ function pyramidLayout(n: number, width: number) {
   return { sizes, rows, heights, top: sizes.length - 1 };
 }
 
+/**
+ * The targets of the sinks for `strains` strains on a grid of `width` × `height` cells (GlSinks), made by `make`. Each
+ * strain has two targets of rates, the levels of its pyramid, and the state two targets of 2 texels per strain. The
+ * keys have a texel per agent slot, in rows of `agentWidth`. The mean pressures and take / G have a lane per strain
+ * (ADR 0075).
+ */
+function makeSinks(
+  make: (width: number, height: number, format: number) => Target,
+  width: number,
+  height: number,
+  strains: number,
+  agentWidth: number,
+  agentHeight: number,
+): GlSinks {
+  const gl = WebGL2RenderingContext;
+  const each = <T>(of: () => T) => Array.from({ length: strains }, of);
+  return {
+    strains,
+    rates: each((): Pair<Target> => [make(width, height, gl.R32F), make(width, height, gl.R32F)]),
+    levels: each(() => sinkLevels(width, height).map(([w, h]) => make(w, h, gl.RGBA32UI))),
+    state: [make(2, strains, gl.RGBA32F), make(2, strains, gl.RGBA32F)],
+    keys: make(agentWidth, agentHeight, gl.R32F),
+    counts: make(PAID_COUNT_LANES, 1, gl.RGBA32F),
+    pressures: make(width, height, gl.RGBA32F),
+    takes: make(width, height, gl.RGBA32F),
+  };
+}
+
 /** Cells of some rectangles. */
 const area = (rects: readonly Rect[]) => rects.reduce((sum, [, , w, h]) => sum + w * h, 0);
+
+/**
+ * The marks of the agent bits that paid.vert counts (ADR 0071, ADR 0100), as common.glsl and growth.glsl define them,
+ * each with the count of paid.ts PAID_COUNTS that it adds to.
+ */
+const MARKS = {
+  front: [1024, PAID_COUNTS.front],
+  paid: [2048, PAID_COUNTS.claims],
+  waits: [4096, PAID_COUNTS.waiting],
+  died: [8192, PAID_COUNTS.died],
+  reborn: [16384, PAID_COUNTS.reborn],
+  jones: [32768, PAID_COUNTS.parents],
+  crowded: [65536, PAID_COUNTS.crowded],
+  born: [131072, PAID_COUNTS.born],
+} as const;
 
 /** Uniform values of the levels of a pyramid, for an array of 13 (growth.frag PASS 4): a grid side of up to 4096. */
 function padded(values: readonly number[]): Int32Array {
@@ -116,34 +204,82 @@ function core({ from: a, to: b, radius }: Stroke) {
   return 2 * rho * Math.hypot(b[0] - a[0], b[1] - a[1]) + Math.PI * rho * rho;
 }
 
-/** A draw of shape.frag: its `op`, the channels it writes (R wall, G food, B light, A shadow), its blend equation. */
-type OutlineDraw = [number, [boolean, boolean, boolean, boolean], 'MAX' | 'MIN' | null];
+/** The channels of the first layer of an outline target, of the second, and of both. */
+type Channels = [boolean, boolean, boolean, boolean];
+const FIRST: Channels = [true, false, false, false];
+const SECOND: Channels = [false, true, false, false];
+const BOTH: Channels = [true, true, false, false];
+/**
+ * A draw of shape.frag: its `op`, the channels it writes (R wall, G food, B light, A shadow), its blend equation, and
+ * for a subtraction how it is rounded off (`cut` in shape.frag): as the union of a pole (1) or of a wall (2).
+ */
+type OutlineDraw = [op: number, channels: Channels, blend: 'MAX' | 'MIN' | null, cut?: 0 | 1 | 2];
+/** The draws of the segments of a kind: per segment, the hold of the subtracted layers, and once per cell of a run. */
+type OutlineDraws = Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDraw; run: OutlineDraw[] }>;
 /**
  * How shape.frag applies a run's segments of a kind to the outline target: per segment over its outline box the
  * union (op 0, MAX blending) or the subtraction (op 1, MIN blending); then, once per cell of the union of the
  * segments' boxes, the hold of the subtracted layers (op 4, MIN blending) and the light and the shadow (op 2). The
  * hold, the light and the shadow depend only on `env` after the run, so overlapping boxes need them once.
  */
-const OUTLINE_DRAWS: Record<EnvTool, { segment: OutlineDraw[]; hold?: OutlineDraw; run: OutlineDraw[] }> = {
-  erase: {
-    segment: [[1, [true, true, false, false], 'MIN']],
-    hold: [4, [true, true, false, false], 'MIN'],
-    run: [[2, [false, false, true, true], null]],
-  },
+const OUTLINE_DRAWS: OutlineDraws = {
+  erase: { segment: [[1, BOTH, 'MIN']], hold: [4, BOTH, 'MIN'], run: [[2, [false, false, true, true], null]] },
   wall: {
     segment: [
-      [0, [true, false, false, false], 'MAX'],
-      [1, [false, true, false, false], 'MIN'],
+      [0, FIRST, 'MAX'],
+      [1, SECOND, 'MIN'],
     ],
-    hold: [4, [false, true, false, false], 'MIN'],
+    hold: [4, SECOND, 'MIN'],
     run: [[2, [false, false, true, true], null]],
   },
-  food: { segment: [[0, [false, true, false, false], 'MAX']], run: [] },
+  food: { segment: [[0, SECOND, 'MAX']], run: [] },
   light: { segment: [], run: [[2, [false, false, true, false], null]] },
-  // An electrode changes no byte of the outline target: the renderer reads its byte from `env` (render.frag poleAt).
+  // An electrode changes no byte of the outline target: its outline lies in `poles` (POLE_DRAWS).
   anode: { segment: [], run: [] },
   cathode: { segment: [], run: [] },
+  // A stroke of the Slime tool joins no run: it changes only the slime field (brushSlime()).
+  slime: { segment: [], run: [] },
+  // A start spot paints nothing (ADR 0066): paint() takes no such stroke (paintsEnv()).
+  start: { segment: [], run: [] },
 };
+/**
+ * The same for the target of the outlines of the electrodes (POLES in shape.frag): R the cathodes, G the anodes. A
+ * cell holds one pole, the one painted last. So a cathode is a union in R and a subtraction in G, as a wall is for
+ * walls and food, and an anode is the mirror. An erase and a wall clear both poles of their cells. Food, light and
+ * slime leave the poles. A pole and a wall fill the cells that they take: their subtraction is rounded off as their
+ * union is, so the pole below ends where the stroke begins (ADR 0058). An erase takes the plain distance.
+ */
+const POLE_DRAWS: OutlineDraws = {
+  erase: { segment: [[1, BOTH, 'MIN']], hold: [4, BOTH, 'MIN'], run: [] },
+  wall: { segment: [[1, BOTH, 'MIN', 2]], hold: [4, BOTH, 'MIN'], run: [] },
+  food: { segment: [], run: [] },
+  light: { segment: [], run: [] },
+  anode: {
+    segment: [
+      [0, SECOND, 'MAX'],
+      [1, FIRST, 'MIN', 1],
+    ],
+    hold: [4, FIRST, 'MIN'],
+    run: [],
+  },
+  cathode: {
+    segment: [
+      [0, FIRST, 'MAX'],
+      [1, SECOND, 'MIN', 1],
+    ],
+    hold: [4, SECOND, 'MIN'],
+    run: [],
+  },
+  slime: { segment: [], run: [] },
+  start: { segment: [], run: [] },
+};
+/** A segment of a run of paint(): its kind, its outline rectangles, and whether `poles` takes its outline too. */
+interface RunItem {
+  segment: Stroke;
+  kind: EnvTool;
+  rects: readonly Rect[];
+  poles: boolean;
+}
 
 /** The simulation with WebGL2 fragment passes (ADR 0003); same model and parameters as sim.ts. */
 export class GlSim implements Sim {
@@ -191,8 +327,21 @@ export class GlSim implements Sim {
   /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
   hasElectrodes = false;
   /**
-   * The boundary under which every byte of the outline target is held to `env`. After a change of boundary, or after
-   * strokes painted under another boundary (then undefined), syncShape() holds it again before its next use.
+   * The outline distances of the electrodes, for the renderer only (shape.frag with POLES; `poles` in ../sim.ts;
+   * ADR 0058): R the distance to the outline of the cathodes, G the one to the outline of the anodes, as `shape` holds
+   * those of walls and food. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and
+   * freed by a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL).
+   */
+  private poles: Target | undefined;
+  /**
+   * Whether a cathode and an anode were painted since the last clear: without them their bytes are all 0, and a
+   * subtraction from them draws nothing (`layers`).
+   */
+  private readonly poleLayers = [false, false];
+  /**
+   * The boundary under which every byte of the outline target and of `poles` is held to `env`. After a change of
+   * boundary, or after strokes painted under another boundary (then undefined), syncShape() holds them again before
+   * their next use.
    */
   private shapeHeld: Boundary | undefined;
   /** Where the outlines of the run that paint() draws next lie (brush.ts). */
@@ -235,6 +384,44 @@ export class GlSim implements Sim {
   private sites: FlowSites = NO_SITES;
   private readonly flowData = new ArrayBuffer(FLOW_BYTES);
   /**
+   * The slime field (slime.frag, ADR 0055; `slime` in ../sim.ts): the stamp of every cell in a target of unsigned
+   * integers, 4 B per cell. Held while the model of the settings has slime (slimeModel()); the fit of the grid counts
+   * it then (sizing.ts slimeBytesPerCell()).
+   */
+  private slime: Target | undefined;
+  /**
+   * The amount of slime of every cell (ADR 0057; PASS 1 of slime.frag), in two targets of unsigned integers (R16UI),
+   * 2 B per cell each: the pass of a step reads one and writes the other, and `am` names the one that holds the
+   * amounts. Made and freed with the stamps (ensureSlime(), dropSlime()), and counted with them.
+   */
+  private amount: [Target, Target] | undefined;
+  /**
+   * The front field (ADR 0060; PASS 2 of slime.frag; `front` in ../sim.ts): the step, plus 1, at which the growth
+   * front reached each cell, in a target of unsigned integers, 4 B per cell. Made and freed with the stamps.
+   */
+  private front: Target | undefined;
+  private am: Bit = 0;
+  /**
+   * The territory of each strain and the owners (ADR 0068; territory.frag; `territory` in ../sim.ts), while the rules
+   * of stage 4 run: two targets of unsigned integers (R8UI), one byte per cell, that the push writes in turn, `tt` the
+   * one that holds the territory now, and the owners in a third.
+   */
+  private territory: { copies: Pair<Target>; owners: Target } | undefined;
+  private tt: Bit = 0;
+  /** The sinks of each strain (GlSinks); `sr` names the current copy of the rates, `st` that of the state. */
+  private sinks: GlSinks | undefined;
+  /** The framebuffers of the test of growth with the keys of the paid births, by the texture of the agents (withKeys()). */
+  private readonly keyFbos = new Map<WebGLTexture, WebGLFramebuffer>();
+  /** The framebuffer of PASS 5 of flow.frag, with the targets `pressures` and `takes` of the sinks (driftTarget()). */
+  private driftFbo: WebGLFramebuffer | undefined;
+  private sr: Bit = 0;
+  private st: Bit = 0;
+  /**
+   * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
+   * was last empty (`stamped` in ../sim.ts). Only then does an erase or a wall clear stamps (brushSlime()).
+   */
+  private stamped = false;
+  /**
    * Without float blending (no collision targets): 1 where a cell holds an agent after the moves, for covered food
    * (diffuse.frag COVERED). Allocated at its first use.
    */
@@ -260,12 +447,19 @@ export class GlSim implements Sim {
   private viewStale = true;
   /**
    * The targets of the picture of the tubes (tubes.frag, ADR 0034), allocated while the settings show it: per cell and
-   * strain the factor of the radius of its tube, the trail that the view draws, and the stream; per tile of the
-   * picture (tubes.ts TUBE_TILE) what its window holds, and that per tile column and row of cells on the way.
-   * `tubesStale`: a change of the state since made the picture stale.
+   * strain the factor of the radius of its tube, and the trail that the view draws; per tile of the picture (tubes.ts
+   * TUBE_TILE) what its window holds, and that per tile column and row of cells on the way. `tubesStale`: a change of
+   * the state since made the picture stale.
    */
-  private tubes: { roots: Target; picture: Target; stream: Target; rows: Target; tiles: Target } | undefined;
+  private tubes: { roots: Target; picture: Target; rows: Target; tiles: Target } | undefined;
   private tubesStale = true;
+  /**
+   * The target of the stream of the plasm (tubes.frag PASS 2), allocated while the view draws the grains (tubes.ts
+   * grainsShown(), ADR 0095), with the picture of the tubes or without it. `streamStale`: a change of the state since
+   * made it stale.
+   */
+  private stream: Target | undefined;
+  private streamStale = true;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.frag
    * clearPath, ADR 0020).
@@ -337,6 +531,22 @@ export class GlSim implements Sim {
       if (floatBlend) {
         const r = () => t(width, height, gl.R32F);
         this.collision = { occ: [r(), r()], claims: r() };
+      }
+      // The slime field, while the model has it: allocated now too, and the budget counts it. A new texture holds
+      // zeros: no cell has a stamp.
+      if (slimeModel(settings)) {
+        this.slime = t(width, height, gl.R32UI);
+        this.amount = [t(width, height, gl.R16UI), t(width, height, gl.R16UI)];
+        this.front = t(width, height, gl.R32UI);
+      }
+      // So with the territory and the sinks while the rules of stage 4 run: no cell lies in a territory, and none was
+      // a sink.
+      if (territoryOn(settings)) {
+        this.territory = {
+          copies: [t(width, height, gl.R8UI), t(width, height, gl.R8UI)],
+          owners: t(width, height, gl.R8UI),
+        };
+        this.sinks = makeSinks(t, width, height, flowStrains(settings), this.agentWidth, agentHeight);
       }
     } catch (err) {
       // The engine retries with a smaller grid: a half-built simulation must not keep its memory.
@@ -441,10 +651,11 @@ export class GlSim implements Sim {
     this.viewThird = undefined;
   }
 
-  /** A change of the state: the view's map and the picture of the tubes are made anew at their next use. */
+  /** A change of the state: the view's map, the picture of the tubes and the stream are made anew at their next use. */
   private changed() {
     this.viewStale = true;
     this.tubesStale = true;
+    this.streamStale = true;
   }
 
   /**
@@ -458,16 +669,28 @@ export class GlSim implements Sim {
     return this.tubes.picture;
   }
 
-  /** The stream of the plasm of the state that pictureTarget() draws (../sim.ts streamTexture); undefined without it. */
-  streamTarget(): Target | undefined {
-    if (!tubesShown(this.settings) || !this.flow) return undefined;
-    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).stream;
-    return this.tubes.stream;
+  /**
+   * The factors of the radius of the tubes of the picture, for the veins of the view (../sim.ts veinTexture, ADR 0099):
+   * set after pictureTarget() while it is the picture of the tubes, else undefined. Display only.
+   */
+  veinTarget(): Target | undefined {
+    if (!tubesShown(this.settings) || !this.flow || this.tubesStale) return undefined;
+    return this.tubes?.roots;
   }
 
   /**
-   * The passes of pictureTarget(): the factor of the radius of every tube, the map of the tiles of the picture, the
-   * picture, and the stream.
+   * The stream of the plasm of the state that the view draws, for the grains (../sim.ts streamTexture): made once for
+   * each state while the view draws the grains (tubes.ts grainsShown(), ADR 0095); undefined while it draws none.
+   */
+  streamTarget(): Target | undefined {
+    if (!grainsShown(this.settings) || !this.flow) return undefined;
+    if (this.streamStale || !this.stream) return this.encodeStream(this.flow);
+    return this.stream;
+  }
+
+  /**
+   * The passes of pictureTarget(): the factor of the radius of every tube, the map of the tiles of the picture, and the
+   * picture.
    */
   private encodeTubes(flow: NonNullable<GlSim['flow']>) {
     this.syncShape();
@@ -482,10 +705,25 @@ export class GlSim implements Sim {
     this.pass(k.rows, tubes.rows, { shape, roots }, {});
     this.pass(k.tiles, tubes.tiles, { rows: tubes.rows.texture }, {});
     this.pass(k.picture, tubes.picture, { trail, shape, roots, tiles: tubes.tiles.texture }, {});
-    const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
-    this.pass(k.stream, tubes.stream, flows, { strains: flow.memory.length });
     this.tubesStale = false;
     return tubes;
+  }
+
+  /** The pass of streamTarget(). It reads the flow, and not the picture of the tubes. */
+  private encodeStream(flow: NonNullable<GlSim['flow']>) {
+    this.syncShape();
+    this.writeParams();
+    // Made at its first use (sizing.ts TUBES_BYTES_PER_CELL counts it with the picture). A target that does not fit
+    // frees its own texture (gl.ts target()).
+    const stream = (this.stream ??= target(this.gl, this.width, this.height, this.gl.RGBA32F));
+    const flows = { ...this.flowMemories(flow), ...this.flowPressures(flow) };
+    const strains = { strains: flow.memory.length };
+    // Over 8 neighbours the stream follows the 8 edges of the flow, and it reads the walls (ADR 0086).
+    if (flowEight(this.settings))
+      this.pass(this.prog.tubeStreamEight(), stream, { ...flows, shape: this.shape.texture }, strains);
+    else this.pass(this.prog.tubeStream(), stream, flows, strains);
+    this.streamStale = false;
+    return stream;
   }
 
   /** The targets of the picture of the tubes, made at their first use (sizing.ts TUBES_BYTES_PER_CELL counts them). */
@@ -494,7 +732,7 @@ export class GlSim implements Sim {
       const gl = this.gl;
       const made: Target[] = [];
       try {
-        for (let i = 0; i < 3; i++) made.push(target(gl, this.width, this.height, gl.RGBA32F));
+        for (let i = 0; i < 2; i++) made.push(target(gl, this.width, this.height, gl.RGBA32F));
         // The map of the tiles and its rows hold 0 or 1 per value.
         const [w, h] = [Math.ceil(this.width / TUBE_TILE), Math.ceil(this.height / TUBE_TILE)];
         made.push(target(gl, w, this.height, gl.RGBA8));
@@ -504,13 +742,7 @@ export class GlSim implements Sim {
         for (const t of made) destroyTarget(gl, t);
         throw error;
       }
-      this.tubes = {
-        roots: at(made, 0),
-        picture: at(made, 1),
-        stream: at(made, 2),
-        rows: at(made, 3),
-        tiles: at(made, 4),
-      };
+      this.tubes = { roots: at(made, 0), picture: at(made, 1), rows: at(made, 2), tiles: at(made, 3) };
     }
     return this.tubes;
   }
@@ -520,11 +752,18 @@ export class GlSim implements Sim {
     if (!this.tubes) return;
     destroyTarget(this.gl, this.tubes.roots);
     destroyTarget(this.gl, this.tubes.picture);
-    destroyTarget(this.gl, this.tubes.stream);
     destroyTarget(this.gl, this.tubes.rows);
     destroyTarget(this.gl, this.tubes.tiles);
     this.tubes = undefined;
     this.tubesStale = true;
+  }
+
+  /** Frees the target of the stream. */
+  private dropStream() {
+    if (!this.stream) return;
+    destroyTarget(this.gl, this.stream);
+    this.stream = undefined;
+    this.streamStale = true;
   }
 
   /** For tests: the trail that the picture draws (pictureTarget()), 4 lanes per cell. */
@@ -532,7 +771,7 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.pictureTarget()) as Float32Array);
   }
 
-  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty without the picture of the tubes. */
+  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty while the view draws no grains. */
   readStream(): Promise<Float32Array> {
     const stream = this.streamTarget();
     return Promise.resolve(stream ? (readTarget(this.gl, stream) as Float32Array) : new Float32Array(0));
@@ -572,14 +811,48 @@ export class GlSim implements Sim {
     return this.shape.texture;
   }
 
-  /** The cells of the simulation, 4 bytes each as readEnv() returns them: the renderer reads the electrodes. */
-  get envTexture(): WebGLTexture {
-    return this.env.texture;
+  /**
+   * For the renderer: the outline distances of the electrodes (`poles`), or undefined while no pole may lie in `env`
+   * (`hasElectrodes`). Call syncShape() before reading it.
+   */
+  get poleTexture(): WebGLTexture | undefined {
+    return this.poles?.texture;
+  }
+
+  /** The outline distances of the electrodes, made at the first pole. A new texture holds zeros: no pole is near. */
+  private ensurePoles(): Target {
+    this.poles ??= target(this.gl, this.width, this.height, this.gl.RGBA8);
+    return this.poles;
+  }
+
+  /** Frees the outline distances of the electrodes: `env` holds no pole. */
+  private dropPoles() {
+    if (this.poles) destroyTarget(this.gl, this.poles);
+    this.poles = undefined;
+    this.poleLayers.fill(false);
   }
 
   /** Agents per cell after the last step, kept in collision mode only; none without float blending. */
   get occupancyTexture(): WebGLTexture | undefined {
     return this.collision?.occ[this.q].texture;
+  }
+
+  /**
+   * The agents per cell after the last step while the rule of one agent per cell runs: the agents are then the plasm,
+   * and the auto levels keep the black level below their trail (exposure.ts levels(), ADR 0062). Nothing without the
+   * rule: agents share cells then, and nobody keeps the texture up to date.
+   */
+  get agentCells(): WebGLTexture | undefined {
+    return this.settings.collisions ? this.occupancyTexture : undefined;
+  }
+
+  /**
+   * The agents that moved into each cell in the last step, one strain per channel (`counts`), while agents share
+   * cells: the auto levels keep the white level above their trail (exposure.ts levels(), ADR 0090). Nothing with the
+   * rule of one agent per cell: agentCells is the plasm then.
+   */
+  get movedCells(): WebGLTexture | undefined {
+    return this.settings.collisions ? undefined : this.counts.texture;
   }
 
   update(settings: Settings) {
@@ -607,9 +880,15 @@ export class GlSim implements Sim {
     }
     // The memory fit counts the targets of the flow only while it is on.
     if (!flowOn(settings) && this.flow) this.dropFlow();
-    // The picture of the tubes holds its targets only while the settings show it (tubes.ts). The memory fit counts them
-    // with the flow, shown or not (sizing.ts tubesBytesPerCell()).
+    // The memory fit counts the slime field only in the model that has it: the Jones model has no slime.
+    if (!slimeModel(settings)) this.dropSlime();
+    // It counts the territory only while the rules of stage 4 run (sizing.ts territoryBytesPerCell()).
+    if (!territoryOn(settings)) this.dropTerritory();
+    // The picture of the tubes holds its targets only while the settings show it, and the stream only while the view
+    // draws the grains (tubes.ts). The memory fit counts them with the flow, shown or not (sizing.ts
+    // tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
+    if (!grainsShown(settings)) this.dropStream();
   }
 
   foodSites(sites: FlowSites) {
@@ -716,6 +995,75 @@ export class GlSim implements Sim {
     this.flowP = 0;
   }
 
+  /**
+   * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): the stamps, and the amounts
+   * with them. No cell has a stamp, and no cell has slime.
+   */
+  private ensureSlime(): { stamps: Target; amounts: [Target, Target]; fronts: Target } {
+    const { gl, width, height } = this;
+    this.slime ??= target(gl, width, height, gl.R32UI);
+    this.amount ??= [target(gl, width, height, gl.R16UI), target(gl, width, height, gl.R16UI)];
+    this.front ??= target(gl, width, height, gl.R32UI);
+    return { stamps: this.slime, amounts: this.amount, fronts: this.front };
+  }
+
+  /**
+   * For the renderer: the texture of the slime field, which the picture reads for the film of the slime (render.frag
+   * `stamps`), or undefined while the simulation holds none (`slimeField` in ../sim.ts).
+   */
+  get slimeTexture(): WebGLTexture | undefined {
+    return this.slime?.texture;
+  }
+
+  /**
+   * For the renderer: the texture of the amounts of slime (ADR 0057), which the picture reads beside the stamps, or
+   * undefined while the simulation holds no slime field (`slimeAmount` in ../sim.ts).
+   */
+  get slimeAmountTexture(): WebGLTexture | undefined {
+    return this.amount?.[this.am].texture;
+  }
+
+  /**
+   * For the renderer: the texture of the front field (ADR 0060), which the picture reads for the sheet of the growth
+   * front, or undefined while the simulation holds no slime field (`slimeFront` in ../sim.ts).
+   */
+  get slimeFrontTexture(): WebGLTexture | undefined {
+    return this.front?.texture;
+  }
+
+  /** Frees the slime field. */
+  private dropSlime() {
+    if (!this.slime) return;
+    destroyTarget(this.gl, this.slime);
+    this.slime = undefined;
+    for (const t of this.amount ?? []) destroyTarget(this.gl, t);
+    this.amount = undefined;
+    if (this.front) destroyTarget(this.gl, this.front);
+    this.front = undefined;
+    this.stamped = false;
+  }
+
+  /**
+   * For tests and measurements: the stamp of every cell as the field holds it (../slime.ts), one value per cell; only
+   * zeros in the Jones model, which has no slime (../sim.ts readSlime()).
+   */
+  readSlime(): Promise<Uint32Array> {
+    if (!this.slime) return Promise.resolve(new Uint32Array(this.width * this.height));
+    return Promise.resolve(readUintTarget(this.gl, this.slime));
+  }
+
+  /** For tests and measurements: the front stamp of every cell (ADR 0060; ../sim.ts readSlimeFront()). */
+  readSlimeFront(): Promise<Uint32Array> {
+    if (!this.front) return Promise.resolve(new Uint32Array(this.width * this.height));
+    return Promise.resolve(readUintTarget(this.gl, this.front));
+  }
+
+  /** For tests and measurements: the amount of slime of every cell (ADR 0057; ../sim.ts readSlimeAmount()). */
+  readSlimeAmount(): Promise<Uint32Array> {
+    if (!this.amount) return Promise.resolve(new Uint32Array(this.width * this.height));
+    return Promise.resolve(readUintTarget(this.gl, this.amount[this.am]));
+  }
+
   private dropFlow() {
     if (!this.flow) return;
     const { memory, pressure, ports, lanes, cells, hits } = this.flow;
@@ -729,7 +1077,8 @@ export class GlSim implements Sim {
   private flowBlock(flow: NonNullable<GlSim['flow']>, strain: number) {
     const gl = this.gl;
     gl.bindBufferBase(gl.UNIFORM_BUFFER, FLOW_BINDING, flow.ubo);
-    const block = packFlow(this.settings, this.sites, this.flowData, strain);
+    // The constants of stage 4 after the sites (territory.ts packTerritory(); ADR 0067, decision 9).
+    const block = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain), this.settings);
     gl.bufferSubData(gl.UNIFORM_BUFFER, 0, new Uint8Array(block));
   }
 
@@ -743,7 +1092,10 @@ export class GlSim implements Sim {
     return { flowMemory: of(0), flowMemory1: of(1), flowMemory2: of(2), flowMemory3: of(3) };
   }
 
-  /** The pressure of the flow of every strain for the stream (tubes.frag): the samplers as flowMemories() names them. */
+  /**
+   * The pressure of the flow of every strain for the stream (tubes.frag) and for the sensors of the rules of stage 4
+   * (agents.frag, ADR 0070): the samplers as flowMemories() names them.
+   */
   private flowPressures(flow: NonNullable<GlSim['flow']>): Record<string, WebGLTexture> {
     const of = (strain: number) => at(flow.pressure[strain] ?? at(flow.pressure, 0), this.flowP).texture;
     return { flowPressure: of(0), flowPressure1: of(1), flowPressure2: of(2), flowPressure3: of(3) };
@@ -774,7 +1126,7 @@ export class GlSim implements Sim {
     if (!flowOn(this.settings) || strain >= flowStrains(this.settings)) return;
     const pressure = at(at(this.ensureFlow().pressure, strain), this.flowP);
     writeTarget(this.gl, pressure, 0, 0, this.width, this.height, data);
-    // The picture of the tubes shows the stream of the plasm (ADR 0034).
+    // The grains show the stream of the plasm (ADR 0034, ADR 0095).
     this.changed();
     this.revision++;
   }
@@ -794,6 +1146,21 @@ export class GlSim implements Sim {
     this.writeParams();
     for (const t of [...this.trail, ...this.scent, this.counts]) clear(gl, t);
     this.clearFlow();
+    // A reset clears every stamp (ADR 0055, decision 3), and the amounts with them.
+    if (this.slime) clearUint(gl, this.slime);
+    for (const t of this.amount ?? []) clearUint(gl, t);
+    if (this.front) clearUint(gl, this.front);
+    this.stamped = false;
+    // A reset clears the territory (ADR 0068): the engine writes the start territory after it (Engine.seedAtFood()).
+    if (this.territory) for (const t of [...this.territory.copies, this.territory.owners]) clearUint(gl, t);
+    this.tt = 0;
+    // And the sinks: no cell was a sink before (ADR 0069).
+    if (this.sinks) {
+      for (const t of [...this.sinks.rates.flat(), ...this.sinks.state]) clear(gl, t);
+      for (const t of this.sinks.levels.flat()) clearUint(gl, t);
+    }
+    this.sr = 0;
+    this.st = 0;
     // Every sampler gets a texture that is not the target: an active sampler on the target is a feedback loop.
     const env = this.env.texture;
     const init = { env, agentsIn: env, occ: env, claims: env };
@@ -939,24 +1306,41 @@ export class GlSim implements Sim {
    * of a run of segments, then their outline draws, so the render target changes twice per run and not twice per
    * segment. A run ends where the boundary changes or a segment of another kind meets it (brush.ts
    * PendingOutlines). Within a run the outlines give the bytes of one segment after another (ADR 0009), so one call
-   * paints what one call per stroke paints.
+   * paints what one call per stroke paints. A stroke of a pole has its outline in `poles` in place of the outline
+   * target, and an erase and a wall have one in both while a pole may lie in `env` (drawOutlines()).
+   *
+   * A stroke of the Slime tool changes no byte of `env` or of the outline target. What the strokes do with the slime
+   * field follows after the environment of all of them (brushSlime(), as paint() in ../sim.ts).
    */
   paint(strokes: readonly Stroke[]) {
-    if (strokes.length === 0) return;
-    this.changed();
+    const env = strokes.filter((s) => paintsEnv(s.kind));
+    const slime = slimeModel(this.settings) && strokes.some((s) => changesSlime(s.kind));
+    if (env.length === 0 && !slime) return;
     this.revision++;
+    if (env.length > 0) this.paintEnv(env);
+    this.brushSlime(strokes);
+  }
+
+  /** The strokes of paint() that change the environment, with their outlines. */
+  private paintEnv(strokes: readonly Stroke[]) {
+    this.changed();
     // After a change of boundary the outline target is held to `env` under the new one first. Strokes under another
     // boundary leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
     if (this.shapeHeld !== undefined) this.syncShape();
     const gl = this.gl;
     const p = this.prog.paint;
-    const run: { segment: Stroke; kind: EnvTool; rects: Rect[] }[] = [];
+    // The target of the outlines of the electrodes, before any target is bound: the strokes paint a pole.
+    if (strokes.some((s) => isPole(s.kind))) this.ensurePoles();
+    const run: RunItem[] = [];
     let boundary: Boundary | undefined;
     let kind = -1; // the kind the paint state is set for; -1: the env target is not bound
     let foreign = false;
     const drawRun = () => {
       if (run.length === 0) return;
       this.drawOutlines(run);
+      // The same segments on the outlines of the electrodes, with the poles as the two layers.
+      const poled = run.filter((item) => item.poles);
+      if (this.poles && poled.length > 0) this.drawOutlines(poled, this.poles);
       run.length = 0;
       this.pending.clear();
       kind = -1;
@@ -971,12 +1355,15 @@ export class GlSim implements Sim {
       if (releases(stroke.kind)) [this.sources, this.scentless] = [true, false];
       if (k !== EnvKind.erase) this.hasEnvironment = true;
       if (pole) this.hasElectrodes = true;
+      if (pole) this.poleLayers[k === EnvKind.cathode ? 0 : 1] = true;
       if (k !== EnvKind.erase && !pole) this.layers[k - 1] = true;
+      // By the poles that the strokes before left: before the first pole no cell holds one.
+      const poles = polesOutlined(stroke.kind, this.hasElectrodes);
       for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
         const rects = scissorRects(segment, this.width, this.height, wrap);
         if (rects.length === 0) continue; // outside a closed arena: no cell to paint or outline
         const reach = outlineRects(segment, this.width, this.height, wrap);
-        if (b !== boundary || (!pole && this.pending.meets(reach, k, wrap))) {
+        if (b !== boundary || this.pending.meets(reach, k, wrap)) {
           drawRun(); // with the parameters of its own boundary
           if (b !== boundary) {
             this.writeParams(undefined, 0, b);
@@ -1003,9 +1390,7 @@ export class GlSim implements Sim {
           gl.scissor(...r);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
-        // An electrode has no outline, so it joins no run: its paint changes no byte that an outline reads.
-        if (pole) continue;
-        run.push({ segment, kind: stroke.kind, rects: reach });
+        run.push({ segment, kind: stroke.kind, rects: reach, poles });
         this.pending.add(reach, k, wrap);
       }
     }
@@ -1016,6 +1401,83 @@ export class GlSim implements Sim {
     if (foreign) this.shapeHeld = undefined;
     // Without walls no pass reads the clearance: an erase then needs none, and compiles no program for walls.
     if (this.walls && strokes.some((s) => s.kind === 'wall' || s.kind === 'erase')) this.updateClearance();
+  }
+
+  /**
+   * Paints only what the strokes do with the slime field (Sim.paintSlime(), ADR 0055, decision 7): the engine paints
+   * the slime of its edit list again after a reset, which clears every stamp. Nothing in the Jones model.
+   */
+  paintSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings) || !strokes.some((s) => changesSlime(s.kind))) return;
+    this.revision++;
+    this.brushSlime(strokes);
+  }
+
+  /**
+   * What strokes do with the slime field (slime-paint.frag; brushSlime() in ../sim.ts), in their order, against `env`
+   * as it is now: one draw per segment into the target of the stamps, scissored to the cells that the segment can
+   * reach. A stroke of the Slime tool gives the open cells of its footprint the stamp of the current step, and an erase
+   * and a wall clear the stamp of their cells. Every other kind draws nothing, and so do an erase and a wall while no
+   * cell holds a stamp (`stamped`). Nothing in the Jones model, which has no field.
+   */
+  private brushSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings)) return;
+    const gl = this.gl;
+    let field: { stamps: Target; amounts: [Target, Target]; fronts: Target } | undefined;
+    let boundary: Boundary | undefined;
+    for (const stroke of strokes) {
+      if (stroke.kind === 'slime') this.stamped = true;
+      if (!changesSlime(stroke.kind) || !this.stamped) continue;
+      const b = stroke.boundary ?? this.settings.boundary;
+      const wrap = b === 'wrap';
+      const k = EnvKind[stroke.kind];
+      for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
+        const rects = scissorRects(segment, this.width, this.height, wrap);
+        if (rects.length === 0) continue; // outside a closed arena: no cell to paint
+        if (!field) {
+          field = this.ensureSlime();
+          gl.viewport(0, 0, this.width, this.height);
+          gl.enable(gl.SCISSOR_TEST);
+        }
+        if (b !== boundary) {
+          this.writeParams(undefined, 0, b);
+          boundary = b;
+        }
+        const [now, free] = [field.amounts[this.am], field.amounts[flip(this.am)]];
+        // The amounts of the segment first (PASS 1 of slime-paint.frag, ADR 0057): they read the stamps of before
+        // the segment. A stroke of the Slime tool also reads the amounts of before it, from a copy of its cells in
+        // the free target. Then the stamps (PASS 0).
+        const passes: [Program, Target, Record<string, WebGLTexture>][] = [
+          [this.prog.slimeBrushAmount(), now, { stamps: field.stamps.texture, old: free.texture }],
+          // The front field (PASS 2, ADR 0060) reads the stamps of before the segment too.
+          [this.prog.slimeBrushFront(), field.fronts, { stamps: field.stamps.texture }],
+          [this.prog.slimeBrush(), field.stamps, {}],
+        ];
+        for (const [p, to, more] of passes) {
+          if (to === now && stroke.kind === 'slime') {
+            gl.bindFramebuffer(gl.READ_FRAMEBUFFER, now.fbo);
+            gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, free.fbo);
+            for (const [x, y, w, h] of rects) {
+              gl.scissor(x, y, w, h);
+              gl.blitFramebuffer(x, y, x + w, y + h, x, y, x + w, y + h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+            }
+          }
+          gl.bindFramebuffer(gl.FRAMEBUFFER, to.fbo);
+          gl.useProgram(p.program);
+          textures(gl, p.program, { env: this.env.texture, ...more });
+          gl.uniform1i(p.loc('arena'), BOUNDARIES.indexOf(this.settings.boundary));
+          gl.uniform1i(p.loc('kind'), k);
+          gl.uniform1f(p.loc('radius'), segment.radius);
+          gl.uniform2f(p.loc('from'), ...segment.from);
+          gl.uniform2f(p.loc('to'), ...segment.to);
+          for (const r of rects) {
+            gl.scissor(...r);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          }
+        }
+      }
+    }
+    if (field) gl.disable(gl.SCISSOR_TEST);
   }
 
   /**
@@ -1035,6 +1497,14 @@ export class GlSim implements Sim {
     this.revision++;
     clear(this.gl, this.env);
     clear(this.gl, this.shape);
+    // No pole is left: the simulation holds their outlines again from the next pole on.
+    this.dropPoles();
+    // Clear clears every stamp, as an erase of the whole grid does (ADR 0055, decision 7).
+    const stamps = this.slime;
+    if (stamps) clearUint(this.gl, stamps);
+    for (const t of this.amount ?? []) clearUint(this.gl, t);
+    if (this.front) clearUint(this.gl, this.front);
+    this.stamped = false;
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
     this.hasElectrodes = false;
@@ -1047,7 +1517,8 @@ export class GlSim implements Sim {
   /**
    * Holds the outline target to `env` under the current boundary (shape.frag op 3, see Simulation.syncShape()), once
    * after the boundary changed or after strokes under another boundary. Op 3 reads the bytes before from a copy,
-   * made one tile at a time so the copy stays small.
+   * made one tile at a time so the copy stays small. The outline distances of the electrodes follow in the same way,
+   * while the simulation holds them.
    */
   syncShape() {
     if (this.shapeHeld === this.settings.boundary) return;
@@ -1059,17 +1530,20 @@ export class GlSim implements Sim {
     const [tw, th] = [Math.min(this.width, REFRESH_TILE), Math.min(this.height, REFRESH_TILE)];
     const copy = target(gl, tw, th, gl.RGBA8);
     gl.enable(gl.SCISSOR_TEST);
-    for (let y = 0; y < this.height; y += th)
-      for (let x = 0; x < this.width; x += tw) {
-        const [w, h] = [Math.min(tw, this.width - x), Math.min(th, this.height - y)];
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.shape.fbo);
-        gl.bindTexture(gl.TEXTURE_2D, copy.texture);
-        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, x, y, w, h);
-        gl.scissor(x, y, w, h);
-        this.pass(this.prog.shape, this.shape, { env: this.env.texture, old: copy.texture }, { op: 3 }, (p) => {
-          gl.uniform2i(p.loc('tile'), x, y);
-        });
-      }
+    const held: [Program, Target][] = [[this.prog.shape, this.shape]];
+    if (this.poles) held.push([this.prog.poleShape(), this.poles]);
+    for (const [program, outlines] of held)
+      for (let y = 0; y < this.height; y += th)
+        for (let x = 0; x < this.width; x += tw) {
+          const [w, h] = [Math.min(tw, this.width - x), Math.min(th, this.height - y)];
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, outlines.fbo);
+          gl.bindTexture(gl.TEXTURE_2D, copy.texture);
+          gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, x, y, w, h);
+          gl.scissor(x, y, w, h);
+          this.pass(program, outlines, { env: this.env.texture, old: copy.texture }, { op: 3 }, (p) => {
+            gl.uniform2i(p.loc('tile'), x, y);
+          });
+        }
     gl.disable(gl.SCISSOR_TEST);
     destroyTarget(gl, copy);
   }
@@ -1140,6 +1614,12 @@ export class GlSim implements Sim {
     return Promise.resolve(readTarget(this.gl, this.shape) as Uint8Array);
   }
 
+  readPoles(): Promise<Uint8Array> {
+    this.syncShape();
+    if (!this.poles) return Promise.resolve(new Uint8Array(this.width * this.height * 4));
+    return Promise.resolve(readTarget(this.gl, this.poles) as Uint8Array);
+  }
+
   /** Agent `index` is its texel: WebGL2 never reorders agents, so the slot is the id (ADR 0005). */
   writeAgent(index: number, a: AgentState) {
     if (!Number.isInteger(index) || index < 0 || index >= this.agents) throw new RangeError(`No agent ${index}.`);
@@ -1166,7 +1646,7 @@ export class GlSim implements Sim {
   /**
    * For tests. The outline target cannot know the distances of an environment written as bytes: it is cleared, and
    * its next use holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow
-   * `env`.
+   * `env`. So with the outline distances of the electrodes, which the simulation holds while the bytes hold a pole.
    */
   writeEnv(data: Uint8Array) {
     this.changed();
@@ -1178,6 +1658,12 @@ export class GlSim implements Sim {
     this.wallOverAgents = this.walls;
     [0, 1, 2].forEach((c) => (this.layers[c] = any(c)));
     this.hasElectrodes = any(3);
+    this.dropPoles();
+    if (this.hasElectrodes) {
+      // A new target holds zeros. Either pole may lie in the bytes.
+      this.ensurePoles();
+      this.poleLayers.fill(true);
+    }
     this.hasEnvironment = this.layers.some(Boolean) || this.hasElectrodes;
     this.sources = any(1) || any(2) || any(3);
     if (this.sources) this.scentless = false;
@@ -1198,11 +1684,16 @@ export class GlSim implements Sim {
     if (this.presence) all.push(this.presence);
     if (this.collision) all.push(...this.collision.occ, this.collision.claims);
     all.push(...this.growthTargets());
+    if (this.poles) all.push(this.poles);
     for (const t of all) destroyTarget(gl, t);
     for (const f of this.mrt) gl.deleteFramebuffer(f);
     this.dropViewThird();
     this.dropFlow();
     this.dropTubes();
+    this.dropStream();
+    this.dropSlime();
+    // The territory and the sinks of the rules of stage 4 (ADR 0068, ADR 0069).
+    this.dropTerritory();
     gl.deleteBuffer(this.ubo);
   }
 
@@ -1210,20 +1701,23 @@ export class GlSim implements Sim {
    * Draws the outlines of a run of segments that paint() has applied to `env` (shape.frag), kind by kind
    * (OUTLINE_DRAWS): in a run, segments of different kinds have boxes that do not meet (PendingOutlines), so their
    * draws touch other cells. Scissors cut every draw to the grid in a closed arena and split it where it crosses the
-   * edge of the periodic grid. The Params block holds the run's boundary.
+   * edge of the periodic grid. The Params block holds the run's boundary. `poles`: the target of the outlines of the
+   * electrodes, to draw into it in place of the outline target (POLE_DRAWS), with the poles as the two layers.
    */
-  private drawOutlines(run: readonly { segment: Stroke; kind: EnvTool; rects: readonly Rect[] }[]) {
+  private drawOutlines(run: readonly RunItem[], poles?: Target) {
     const gl = this.gl;
-    const sp = this.prog.shape;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.shape.fbo);
+    const sp = poles ? this.prog.poleShape() : this.prog.shape;
+    const draws = poles ? POLE_DRAWS : OUTLINE_DRAWS;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, (poles ?? this.shape).fbo);
     gl.viewport(0, 0, this.width, this.height);
     gl.useProgram(sp.program);
     // `old` (op 3) is never read here, but its unit must not hold the target: a frame binds it there.
     textures(gl, sp.program, { env: this.env.texture, old: this.env.texture });
     gl.enable(gl.SCISSOR_TEST);
-    const [walls, food, light] = this.layers;
-    const draw = ([op, all, equation]: OutlineDraw, rects: readonly Rect[], hold = false, core = false) => {
-      // Only the layers that hold anything: a subtraction of food or walls, the light and the shadow.
+    // `poles` holds no light and no shadow.
+    const [walls, food, light] = poles ? [...this.poleLayers, false] : this.layers;
+    const draw = ([op, all, equation, cut = 0]: OutlineDraw, rects: readonly Rect[], hold = false, core = false) => {
+      // Only the layers that hold anything: a subtraction of food or walls (or of a pole), the light and the shadow.
       const mask: [boolean, boolean, boolean, boolean] =
         op === 1 || op === 4
           ? [all[0] && !!walls, all[1] && !!food, false, false]
@@ -1234,6 +1728,7 @@ export class GlSim implements Sim {
       else gl.disable(gl.BLEND);
       gl.uniform1i(sp.loc('op'), op);
       gl.uniform1i(sp.loc('hold'), Number(hold));
+      gl.uniform1i(sp.loc('cut'), cut);
       gl.uniform1i(sp.loc('core'), Number(core));
       gl.uniform2i(sp.loc('layers'), Number(mask[0]), Number(mask[1]));
       for (const r of rects) {
@@ -1241,10 +1736,10 @@ export class GlSim implements Sim {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
     };
-    const byKind: Partial<Record<EnvTool, (typeof run)[number][]>> = {};
+    const byKind: Partial<Record<EnvTool, RunItem[]>> = {};
     for (const item of run) (byKind[item.kind] ??= []).push(item);
-    for (const [kind, items] of Object.entries(byKind) as [EnvTool, (typeof run)[number][]][]) {
-      const { segment, hold, run: after } = OUTLINE_DRAWS[kind];
+    for (const [kind, items] of Object.entries(byKind) as [EnvTool, RunItem[]][]) {
+      const { segment, hold, run: after } = draws[kind];
       // The rectangles of one segment do not overlap (outlineRects): they are their own union.
       const union = () => (items.length === 1 ? (items[0]?.rects ?? []) : unionRects(items.flatMap((i) => i.rects)));
       const cells = hold || after.length > 0 ? union() : [];
@@ -1290,8 +1785,12 @@ export class GlSim implements Sim {
    */
   private agentProgram(): Program {
     const senseWalls = this.walls && this.settings.model === 'extended';
-    // With the flow in the tubes, the pass in which agents starve and come to life by the flow memory (ADR 0029).
-    if (flowOn(this.settings)) return this.prog.flowing(senseWalls, trailSaturation(this.settings) > 0);
+    // With the flow in the tubes, the pass in which agents starve and come to life by the flow memory (ADR 0029), and
+    // with the rules of stage 4 move and come to life only onto the territory (ADR 0068).
+    if (flowOn(this.settings)) {
+      const territory = this.settings.collisions && territoryOn(this.settings);
+      return this.prog.flowing(senseWalls, trailSaturation(this.settings) > 0, territory);
+    }
     if (trailSaturation(this.settings) > 0) {
       const p = this.prog.saturated();
       return senseWalls ? p.walled : p.agents;
@@ -1330,6 +1829,23 @@ export class GlSim implements Sim {
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
     if (flow) this.flowBlock(flow, 0);
     const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
+    // The rules of stage 4 (ADR 0068): the agent passes and growth read the territory of the step before, the owners
+    // come from the agents after the moves and the births, and the push writes the next territory.
+    const territory = this.settings.collisions && territoryOn(this.settings) ? this.ensureTerritory() : undefined;
+    const held: Record<string, WebGLTexture> = territory ? { territory: territory.copies[this.tt].texture } : {};
+    // The sinks of each strain (ADR 0069), in the passes of the flow.
+    const sinks = territory ? this.ensureSinks() : undefined;
+    // With the rules the sensors read the mean pressure of the flow of the step before and what the sink of each cell
+    // takes over its conductivity, of each strain (TERRITORY in agents.frag, ADR 0070, ADR 0075), which PASS 5 of
+    // flow.frag writes first, and the state and the counts of the paid births (ADR 0100): 16 samplers in all, the 16
+    // that every device has.
+    if (flow && sinks) this.encodeDrift(flow, sinks);
+    const pressures: Record<string, WebGLTexture> =
+      flow && sinks ? { pressures: sinks.pressures.texture, takes: sinks.takes.texture } : {};
+    // With the rules of stage 4, mode 3 reads the budget and the counts of the step (ADR 0100): 16 samplers in all.
+    const paidTextures: Record<string, WebGLTexture> = sinks
+      ? { paidState: sinks.state[this.st].texture, paidCounts: sinks.counts.texture }
+      : {};
     const agentPass = (mode: number, src: Target, dst: Target, occ: WebGLTexture, claims: WebGLTexture) => {
       this.pass(
         agentProgram,
@@ -1343,6 +1859,9 @@ export class GlSim implements Sim {
           claims,
           clearance: this.clearance.texture,
           ...flowMemory,
+          ...held,
+          ...pressures,
+          ...paidTextures,
         },
         { agentWidth: this.agentWidth, mode },
       );
@@ -1355,11 +1874,26 @@ export class GlSim implements Sim {
       const [A, B] = [this.agentsTex[this.a], this.agentsTex[flip(this.a)]];
       const occ = col.occ[this.q];
       agentPass(1, A, B, occ.texture, dummy);
+      // With the rules of stage 4 (ADR 0100): the counts of the step start at 0; the respawns that wait and the deaths
+      // of mode 1, then mode 3 lets the respawns that the budget pays claim their cells. The agents then lie in A.
+      let claimed = B;
+      if (sinks) {
+        clear(gl, sinks.counts);
+        this.countPaid(sinks, B, [MARKS.waits, MARKS.died]);
+        agentPass(3, B, A, occ.texture, dummy);
+        claimed = A;
+      }
       clear(gl, col.claims);
-      // A tool's spot needs the occupancy (tools.glsl placement), and a spot of the flow its memory.
-      const claimPoints = flow ? this.prog.flow().points : this.prog.points;
-      this.points(1, col.claims, gl.MAX, B, [0, 0, 0, 0], { occ: occ.texture, ...flowMemory }, claimPoints);
-      agentPass(2, B, A, occ.texture, col.claims.texture);
+      // A tool's spot needs the occupancy (tools.glsl placement), and a spot of the flow its memory and the territory.
+      const claimPoints = territory ? this.prog.territory().points : flow ? this.prog.flow().points : this.prog.points;
+      const spots = { occ: occ.texture, ...flowMemory, ...held };
+      this.points(1, col.claims, gl.MAX, claimed, [0, 0, 0, 0], spots, claimPoints);
+      if (sinks) {
+        // Settle into B, and count the respawns that came to life.
+        agentPass(2, A, B, occ.texture, col.claims.texture);
+        this.a = flip(this.a);
+        this.countPaid(sinks, B, [MARKS.reborn]);
+      } else agentPass(2, B, A, occ.texture, col.claims.texture);
       const next = col.occ[flip(this.q)];
       clear(gl, next);
       this.points(2, next, gl.FUNC_ADD);
@@ -1369,7 +1903,9 @@ export class GlSim implements Sim {
     // Growth and shrinkage after the deposits, so an agent that shrinkage deletes keeps the trail of its move, as on
     // WebGPU (ADR 0025). Only with the rule, on the steps that test them.
     const tests = growthTests(this.settings, this.step);
-    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow);
+    if (col && (tests.grow || tests.shrink)) this.encodeGrowth(tests.grow, held, sinks);
+    // The owners after the moves and the births of the step (owners.vert).
+    if (territory) this.encodeOwners(territory);
     const covered = this.settings.coveredFood;
     // The unused sampler `occ` gets a texture that is no target of the diffusion pass.
     const occ = covered ? this.occupancyAfterMoves() : this.env.texture;
@@ -1401,7 +1937,398 @@ export class GlSim implements Sim {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.p = out;
     }
-    if (flow) this.encodeFlow(flow);
+    // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time
+    // (slime.frag; encodeSlime in ../sim.ts, ADR 0055): a cell that holds plasm gets the stamp of the step, and the
+    // pass discards the fragment of every other cell.
+    if (slimeSteps(this.settings) > 0) {
+      this.stamped = true;
+      const { stamps, amounts, fronts } = this.ensureSlime();
+      const trail = this.trail[this.p].texture;
+      // The amounts first (ADR 0057): their pass reads the stamps of before the step, and writes every amount into
+      // the free target.
+      const held = { trail, stamps: stamps.texture, amounts: amounts[this.am].texture };
+      this.pass(this.prog.slimeAmount(), amounts[flip(this.am)], held, {});
+      this.am = flip(this.am);
+      // The front field (ADR 0060) reads the stamps of before the step too.
+      this.pass(this.prog.slimeFront(), fronts, { trail, stamps: stamps.texture }, {});
+      this.pass(this.prog.slime(), stamps, { trail }, {});
+    }
+    if (flow) this.encodeFlow(flow, territory && sinks ? { territory, sinks } : undefined);
+    // The push last (ADR 0067, decision 6). It reads the constants of stage 4 of the uniform block of the flow, which the
+    // block of every strain holds (flowBlock()).
+    if (territory && flow) this.encodePush(territory);
+  }
+
+  /**
+   * Adds the agents of `agents` that hold each mark of `marks` to its count of the step (paid.vert, ADR 0100): one point
+   * per agent slot and mark, with additive blending into `sinks.counts`, a lane per strain.
+   */
+  private countPaid(sinks: GlSinks, agents: Target, marks: readonly (readonly [number, number])[]) {
+    const gl = this.gl;
+    const p = this.prog.territory().paid;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sinks.counts.fbo);
+    gl.viewport(0, 0, sinks.counts.width, sinks.counts.height);
+    gl.useProgram(p.program);
+    textures(gl, p.program, { agents: agents.texture });
+    gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
+    gl.uniform1i(p.loc('parts'), marks.length);
+    gl.uniform1i(p.loc('lanes'), PAID_COUNT_LANES);
+    gl.uniform1uiv(
+      p.loc('marks'),
+      Uint32Array.from({ length: 4 }, (_, k) => marks[k]?.[0] ?? 0),
+    );
+    gl.uniform1iv(
+      p.loc('texels'),
+      Int32Array.from({ length: 4 }, (_, k) => marks[k]?.[1] ?? 0),
+    );
+    this.blend(gl.FUNC_ADD);
+    gl.drawArrays(gl.POINTS, 0, marks.length * this.agents);
+    gl.disable(gl.BLEND);
+  }
+
+  /**
+   * Adds the steps of the rate of each agent with a key of the growth test to the sum P of its strain (paid.vert SHARE,
+   * ADR 0100, part A): two points per agent slot, the steps / 64 to PAID_COUNTS shareHigh and the rest to shareLow.
+   */
+  private countShare(sinks: GlSinks) {
+    const gl = this.gl;
+    const p = this.prog.territory().share;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sinks.counts.fbo);
+    gl.viewport(0, 0, sinks.counts.width, sinks.counts.height);
+    gl.useProgram(p.program);
+    textures(gl, p.program, {
+      agents: this.agentsTex[this.a].texture,
+      keys: sinks.keys.texture,
+      ...this.ratesOf(sinks),
+    });
+    gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
+    gl.uniform1i(p.loc('parts'), 2);
+    gl.uniform1i(p.loc('lanes'), PAID_COUNT_LANES);
+    gl.uniform1iv(p.loc('texels'), Int32Array.of(PAID_COUNTS.shareHigh, PAID_COUNTS.shareLow, 0, 0));
+    this.blend(gl.FUNC_ADD);
+    gl.drawArrays(gl.POINTS, 0, 2 * this.agents);
+    gl.disable(gl.BLEND);
+  }
+
+  /** The owners of every cell from the agents after the moves and the births (owners.vert, PASS 2 of territory.frag). */
+  private encodeOwners(territory: { owners: Target }) {
+    const gl = this.gl;
+    const p = this.prog.territory().owners;
+    clearUint(gl, territory.owners);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, territory.owners.fbo);
+    gl.viewport(0, 0, this.width, this.height);
+    gl.useProgram(p.program);
+    textures(gl, p.program, { agents: this.agentsTex[this.a].texture });
+    gl.uniform1i(p.loc('agentWidth'), this.agentWidth);
+    // A target of unsigned integers takes no blending: with one agent per cell no two points meet.
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.POINTS, 0, this.agents);
+  }
+
+  /** The push (PASS 0 of territory.frag): the next territory, which becomes the current one. */
+  private encodePush(territory: { copies: Pair<Target>; owners: Target }) {
+    const { copies, owners } = territory;
+    const tex = { territory: copies[this.tt].texture, owners: owners.texture, env: this.env.texture };
+    this.pass(this.prog.territory().push, copies[flip(this.tt)], tex, {});
+    this.tt = flip(this.tt);
+  }
+
+  /**
+   * The targets of the territory, made at their first use while the rules of stage 4 run (sizing.ts
+   * TERRITORY_BYTES_PER_CELL). New targets hold zeros: no cell lies in a territory.
+   */
+  private ensureTerritory(): { copies: Pair<Target>; owners: Target } {
+    if (!this.territory) {
+      const gl = this.gl;
+      const [w, h] = [this.width, this.height];
+      this.territory = allOrNothing(gl, (keep) => {
+        const make = () => keep(target(gl, w, h, gl.R8UI));
+        return { copies: [make(), make()], owners: make() };
+      });
+      this.tt = 0;
+    }
+    return this.territory;
+  }
+
+  /** Frees the targets of the territory, and with them those of the sinks. */
+  private dropTerritory() {
+    this.dropSinks();
+    if (!this.territory) return;
+    for (const t of [...this.territory.copies, this.territory.owners]) destroyTarget(this.gl, t);
+    this.territory = undefined;
+  }
+
+  /**
+   * The targets of the sinks, made at their first use while the rules of stage 4 run (sizing.ts SINK_BYTES_PER_CELL_GL,
+   * and DRIFT_BYTES_PER_CELL_GL for the two targets of the drift), for the strains of the settings: settings with
+   * another number of strains get new targets, as the flow gets new ones (ensureFlow()). New targets hold zeros: no
+   * cell was a sink.
+   */
+  private ensureSinks(): GlSinks {
+    const strains = flowStrains(this.settings);
+    if (this.sinks && this.sinks.strains !== strains) this.dropSinks();
+    if (!this.sinks) {
+      const gl = this.gl;
+      const agentHeight = Math.ceil(this.slots / this.agentWidth);
+      this.sinks = allOrNothing(gl, (keep) =>
+        makeSinks(
+          (w, h, format) => keep(target(gl, w, h, format)),
+          this.width,
+          this.height,
+          strains,
+          this.agentWidth,
+          agentHeight,
+        ),
+      );
+      this.sr = 0;
+      this.st = 0;
+    }
+    return this.sinks;
+  }
+
+  /** Frees the targets of the sinks, and the framebuffers of the test that write the keys and of the drift. */
+  private dropSinks() {
+    for (const fbo of this.keyFbos.values()) this.gl.deleteFramebuffer(fbo);
+    this.keyFbos.clear();
+    if (this.driftFbo) this.gl.deleteFramebuffer(this.driftFbo);
+    this.driftFbo = undefined;
+    if (!this.sinks) return;
+    const { rates, levels, state, keys, counts, pressures, takes } = this.sinks;
+    for (const t of [...rates.flat(), ...levels.flat(), ...state, keys, counts, pressures, takes])
+      destroyTarget(this.gl, t);
+    this.sinks = undefined;
+  }
+
+  /**
+   * The target of PASS 5 of flow.frag (ADR 0075): `pressures` and `takes` of the sinks as the two targets of one
+   * framebuffer, made at its first use.
+   */
+  private driftTarget(sinks: GlSinks): Target {
+    const gl = this.gl;
+    if (!this.driftFbo) {
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sinks.pressures.texture, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, sinks.takes.texture, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.deleteFramebuffer(fbo);
+        throw new Error('The drift cannot write the mean pressures and what the sinks take at once');
+      }
+      this.driftFbo = fbo;
+    }
+    return { ...sinks.pressures, fbo: this.driftFbo };
+  }
+
+  /**
+   * What the sensors of each strain read of its flow (PASS 5 of flow.frag, ADR 0075), at the start of a step, before
+   * the agent passes: lane s of the mean pressures and of take / G, from the memory, the pressure, the rates and the
+   * state as the flow of the step before left them. Each strain draws with its block into its lane alone; then the
+   * block of the first strain, which the agent passes read, is bound again.
+   */
+  private encodeDrift(flow: NonNullable<GlSim['flow']>, sinks: GlSinks) {
+    const gl = this.gl;
+    const drift = this.prog.sinks().drift;
+    const dst = this.driftTarget(sinks);
+    for (let strain = 0; strain < sinks.strains; strain++) {
+      this.flowBlock(flow, strain);
+      gl.colorMask(strain === 0, strain === 1, strain === 2, strain === 3);
+      this.pass(
+        drift,
+        dst,
+        {
+          memory: at(flow.memory, strain)[this.flowM].texture,
+          pressureIn: at(at(flow.pressure, strain), this.flowP).texture,
+          rates: at(sinks.rates, strain)[this.sr].texture,
+          state: sinks.state[this.st].texture,
+        },
+        {},
+      );
+    }
+    gl.colorMask(true, true, true, true);
+    this.flowBlock(flow, 0);
+  }
+
+  /**
+   * The target of the test of growth while the rules of stage 4 run (growth.frag PASS 2, ADR 0071): the agents `dst`
+   * and the keys of the paid births, as the two targets of one framebuffer, made at its first use for each copy of the
+   * agents.
+   */
+  private withKeys(dst: Target, sinks: GlSinks): Target {
+    const gl = this.gl;
+    let fbo = this.keyFbos.get(dst.texture);
+    if (!fbo) {
+      fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst.texture, 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, sinks.keys.texture, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.deleteFramebuffer(fbo);
+        throw new Error('The test of growth cannot write the agents and the keys of the paid births at once');
+      }
+      this.keyFbos.set(dst.texture, fbo);
+    }
+    return { ...dst, fbo };
+  }
+
+  /**
+   * The sink rates of the step before for the samplers `rates` to `rates3` of growth.frag PASS 2 (ADR 0071): strain A
+   * in the place of a strain that the scene does not have.
+   */
+  private ratesOf(sinks: GlSinks): Record<string, WebGLTexture> {
+    const rate = (s: number) => (sinks.rates[s] ?? at(sinks.rates, 0))[this.sr].texture;
+    return { rates: rate(0), rates1: rate(1), rates2: rate(2), rates3: rate(3) };
+  }
+
+  /**
+   * The sinks of a strain and its state (sinks.frag, ADR 0069), after the update of its flow and before its pressure,
+   * with the block of the strain bound: `memory` is its memory after the update, `ports` the ports of the step. The
+   * next copies of the rates and of the state become the current ones after the last strain (encodeFlow()).
+   */
+  private encodeSinks(
+    stage4: { territory: { copies: Pair<Target>; owners: Target }; sinks: GlSinks },
+    strain: number,
+    memory: WebGLTexture,
+    ports: WebGLTexture,
+  ) {
+    const gl = this.gl;
+    const programs = this.prog.sinks();
+    const { territory, sinks } = stage4;
+    const rates = at(sinks.rates, strain);
+    const next = rates[flip(this.sr)];
+    this.pass(
+      programs.sinks,
+      next,
+      {
+        env: this.env.texture,
+        owners: territory.owners.texture,
+        territory: territory.copies[this.tt].texture,
+        stamps: this.ensureSlime().stamps.texture,
+        memory,
+        ratesIn: rates[this.sr].texture,
+        // The ports of the step: the test of the tube of a sink (ADR 0072).
+        ports,
+      },
+      {},
+    );
+    // The pyramid of the sums: the first level from the rates, each level above from the one below it.
+    const levels = at(sinks.levels, strain);
+    levels.forEach((level, k) => {
+      const below = levels[k - 1];
+      if (!below) this.pass(programs.first, level, { rates: next.texture, memory }, {});
+      else
+        this.pass(programs.level, level, { below: below.texture }, {}, (p) => {
+          gl.uniform2i(p.loc('belowSize'), below.width, below.height);
+        });
+    });
+    // The state of the strain: its two texels of the next copy.
+    const out = sinks.state[flip(this.st)];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
+    gl.viewport(0, strain, 2, 1);
+    const state = programs.state;
+    gl.useProgram(state.program);
+    const sums = at(levels, levels.length - 1).texture;
+    const stateIn = sinks.state[this.st].texture;
+    textures(gl, state.program, { sums, ports, stateIn, paidCounts: sinks.counts.texture });
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** For tests: the sink rates of a strain, with a minus sign for a sink of the last step (../sim.ts readSinks()). */
+  readSinks(strain = 0): Promise<Float32Array> {
+    const n = this.width * this.height;
+    const rates = this.sinks?.rates[strain];
+    if (!rates) return Promise.resolve(new Float32Array(n));
+    const rgba = readTarget(this.gl, rates[this.sr]);
+    return Promise.resolve(Float32Array.from({ length: n }, (_, i) => rgba[i * 4] ?? 0));
+  }
+
+  /** For tests: the sums of each strain of the last step, the top of its pyramid (../sim.ts readSinkSums()). */
+  readSinkSums(): Promise<Uint32Array> {
+    const out = new Uint32Array(SINK_SUM_WORDS * flowStrains(this.settings));
+    this.sinks?.levels.forEach((levels, strain) => {
+      out.set(readUint4Target(this.gl, at(levels, levels.length - 1)), strain * SINK_SUM_WORDS);
+    });
+    return Promise.resolve(out);
+  }
+
+  /** For tests: the state of each strain of the last step (../sim.ts readSinkState()). */
+  readSinkState(): Promise<Float32Array> {
+    if (!this.sinks) return Promise.resolve(new Float32Array(SINK_STATE_LANES * flowStrains(this.settings)));
+    return Promise.resolve(readTarget(this.gl, this.sinks.state[this.st]) as Float32Array);
+  }
+
+  /** For tests: replaces the state of each strain (Sim.writeSinkState()), while the rules of stage 4 run. */
+  writeSinkState(data: Float32Array) {
+    if (!territoryOn(this.settings)) return;
+    const sinks = this.ensureSinks();
+    const lanes = data.subarray(0, SINK_STATE_LANES * sinks.strains);
+    writeTarget(this.gl, sinks.state[this.st], 0, 0, 2, sinks.strains, lanes);
+  }
+
+  /** For tests: the keys of the paid births of the last growth step, by agent (../sim.ts readPaidKeys()). */
+  readPaidKeys(): Promise<Float32Array> {
+    if (!this.sinks) return Promise.resolve(new Float32Array(0));
+    const rgba = readTarget(this.gl, this.sinks.keys);
+    return Promise.resolve(Float32Array.from({ length: this.agents }, (_, i) => rgba[i * 4] ?? 0));
+  }
+
+  /** For tests: the counts of the last step that settle the budget (../sim.ts readPaidCounts(); ADR 0100). */
+  readPaidCounts(): Promise<Uint32Array> {
+    const strains = flowStrains(this.settings);
+    if (!this.sinks) return Promise.resolve(new Uint32Array(PAID_COUNT_LANES * strains));
+    const rgba = readTarget(this.gl, this.sinks.counts);
+    const n = this.sinks.strains;
+    return Promise.resolve(
+      Uint32Array.from(
+        { length: PAID_COUNT_LANES * n },
+        (_, k) => rgba[(k % PAID_COUNT_LANES) * 4 + Math.floor(k / PAID_COUNT_LANES)] ?? 0,
+      ),
+    );
+  }
+
+  /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
+  writeSinks(data: Float32Array, strain = 0) {
+    if (!territoryOn(this.settings)) return;
+    const rates = this.ensureSinks().rates[strain];
+    if (rates) writeTarget(this.gl, rates[this.sr], 0, 0, this.width, this.height, data);
+  }
+
+  /** The start territory (Sim.addTerritory(); PASS 1 of territory.frag). Nothing while the rules do not run. */
+  addTerritory(strain: number, x: number, y: number, radius: number) {
+    if (!territoryOn(this.settings)) return;
+    const gl = this.gl;
+    const { copies } = this.ensureTerritory();
+    this.writeParams();
+    const p = this.prog.territory().disc;
+    const tex = { territory: copies[this.tt].texture, env: this.env.texture };
+    this.pass(p, copies[flip(this.tt)], tex, {}, (prog) => {
+      gl.uniform4f(prog.loc('disc'), x, y, radius, strain);
+    });
+    this.tt = flip(this.tt);
+  }
+
+  /** For tests and measurements: the territory, one byte per cell (Sim.readTerritory()). */
+  readTerritory(): Promise<Uint8Array> {
+    if (!this.territory) return Promise.resolve(new Uint8Array(this.width * this.height));
+    return Promise.resolve(Uint8Array.from(readUintTarget(this.gl, this.territory.copies[this.tt])));
+  }
+
+  /** For tests: the owners of the last step, one byte per cell (Sim.readOwners()). */
+  readOwners(): Promise<Uint8Array> {
+    if (!this.territory) return Promise.resolve(new Uint8Array(this.width * this.height));
+    return Promise.resolve(Uint8Array.from(readUintTarget(this.gl, this.territory.owners)));
+  }
+
+  /** For tests: replaces the territory, one byte per cell (Sim.writeTerritory()), while the rules of stage 4 run. */
+  writeTerritory(data: Uint8Array) {
+    if (!territoryOn(this.settings)) return;
+    const gl = this.gl;
+    const t = this.ensureTerritory().copies[this.tt];
+    // Rows of one byte per cell: no row needs to start at a multiple of 4.
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    writeTarget(gl, t, 0, 0, this.width, this.height, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   }
 
   /**
@@ -1409,8 +2336,20 @@ export class GlSim implements Sim {
    * the memory from the pressure and the trail of this step, then the pressure iterations on the new conductivity.
    * Once per strain, each with its own targets and its own block (ADR 0031).
    */
-  private encodeFlow(flow: NonNullable<GlSim['flow']>) {
+  private encodeFlow(
+    flow: NonNullable<GlSim['flow']>,
+    stage4?: { territory: { copies: Pair<Target>; owners: Target }; sinks: GlSinks },
+  ) {
     const programs = this.prog.flow();
+    // While the rules of stage 4 run, the update and the pressure that take the sinks (TERRITORY in flow.frag, ADR
+    // 0070): the update reads the current copy of the state, whether the front took flux in the step before; the
+    // pressure reads the next copies of the rates and of the state, which encodeSinks() writes for its strain.
+    const taking = stage4 ? this.prog.sinks() : undefined;
+    // Over 8 neighbours (EIGHT in flow.frag, ADR 0086), the update and the pressure of that variant, with the sinks or
+    // without them.
+    const eight = flowEight(this.settings) ? this.prog.flowEight(stage4 !== undefined) : undefined;
+    const update = eight?.update ?? taking?.update ?? programs.update;
+    const iterate = eight?.pressure ?? taking?.pressure ?? programs.pressure;
     const env = this.env.texture;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
@@ -1431,8 +2370,9 @@ export class GlSim implements Sim {
       const pressure = at(flow.pressure, strain);
       this.flowBlock(flow, strain);
       p = this.flowP;
+      const took = stage4 ? { state: stage4.sinks.state[this.st].texture } : {};
       this.pass(
-        programs.update,
+        update,
         memories[next],
         {
           env,
@@ -1440,14 +2380,23 @@ export class GlSim implements Sim {
           pressureIn: at(pressure, p).texture,
           trail: this.trail[this.p].texture,
           ports: ports.texture,
+          ...took,
         },
         {},
       );
       const memory = memories[next].texture;
+      // While the rules of stage 4 run, the sinks of the strain from its memory after the update (ADR 0069).
+      if (stage4) this.encodeSinks(stage4, strain, memory, ports.texture);
+      const sinks = stage4
+        ? {
+            rates: at(stage4.sinks.rates, strain)[flip(this.sr)].texture,
+            state: stage4.sinks.state[flip(this.st)].texture,
+          }
+        : {};
       for (let i = 0; i < FLOW_ITERATIONS; i++) {
         const [behind, out] = [(p + 2) % 3, (p + 1) % 3];
         this.pass(
-          programs.pressure,
+          iterate,
           at(pressure, out),
           {
             env,
@@ -1455,6 +2404,7 @@ export class GlSim implements Sim {
             pressureIn: at(pressure, p).texture,
             pressureBefore: at(pressure, behind).texture,
             ports: ports.texture,
+            ...sinks,
           },
           // The first two iterations take the pressure of the reference cell off (RECENTRE in flow.wgsl).
           { recentre: i < 2 ? i + 1 : 0 },
@@ -1464,6 +2414,10 @@ export class GlSim implements Sim {
     });
     this.flowM = next;
     this.flowP = p;
+    if (stage4) {
+      this.sr = flip(this.sr);
+      this.st = flip(this.st);
+    }
   }
 
   /**
@@ -1472,7 +2426,7 @@ export class GlSim implements Sim {
    * pass through the tests, and on a growth step through the claims, the pyramids and the births. Then the occupancy
    * is counted anew for the next step.
    */
-  private encodeGrowth(grow: boolean) {
+  private encodeGrowth(grow: boolean, territory: Record<string, WebGLTexture>, sinks: GlSinks | undefined) {
     const gl = this.gl;
     const g = this.ensureGrowth();
     const p = this.prog.growth();
@@ -1489,13 +2443,70 @@ export class GlSim implements Sim {
     // read.
     const flow = flowOn(this.settings) ? this.flow : undefined;
     const flowMemory: Record<string, WebGLTexture> = flow ? this.flowMemories(flow) : {};
+    // With the rules of stage 4, the test in which a child is born only onto the territory (TERRITORY in growth.frag,
+    // ADR 0068): it reads the territory that the agent pass of the step read. It also marks the agents of the front of
+    // the births that the flux pays and writes their keys, from the sink rates of the step before (ADR 0071).
+    const paid = territory.territory ? sinks : undefined;
+    const test = paid ? this.prog.territory().test : flow ? this.prog.growthFlowing() : p.test;
     this.pass(
-      flow ? this.prog.growthFlowing() : p.test,
-      tested,
-      { agentsIn: this.agentsTex[this.a].texture, windows, occ, env, ...flowMemory },
-      { agentWidth },
+      test,
+      paid ? this.withKeys(tested, paid) : tested,
+      {
+        agentsIn: this.agentsTex[this.a].texture,
+        windows,
+        occ,
+        env,
+        ...flowMemory,
+        ...territory,
+        ...(paid ? this.ratesOf(paid) : {}),
+      },
+      {
+        agentWidth,
+      },
     );
     this.a = flip(this.a);
+    // The sum P of the rates of the agents with a key, which the rank reads (paid.vert SHARE, ADR 0100, part A).
+    if (grow && paid) this.countShare(paid);
+    if (grow && paid) {
+      // The rank of the paid births (PASS 5): a paid parent marks GROWS, PAID and the neighbour of its child, and the
+      // points below claim the neighbour for it. It reads the budget of the state of the step before.
+      const stage4 = this.prog.territory();
+      this.pass(
+        stage4.rank,
+        this.agentsTex[flip(this.a)],
+        {
+          agentsIn: this.agentsTex[this.a].texture,
+          keys: paid.keys.texture,
+          occ,
+          env,
+          ...flowMemory,
+          ...territory,
+          state: paid.state[this.st].texture,
+          paidCounts: paid.counts.texture,
+        },
+        { agentWidth },
+      );
+      this.a = flip(this.a);
+    }
+    if (paid) {
+      // F, K, the parents of Jones' rule that wait and the deaths by shrinkage of the step (paid.vert, ADR 0100).
+      this.countPaid(paid, this.agentsTex[this.a], [MARKS.front, MARKS.paid, MARKS.jones, MARKS.crowded]);
+    }
+    if (grow && paid) {
+      // The parents of Jones' rule that the budget pays (PASS 6, ADR 0100): they mark GROWS.
+      const stage4 = this.prog.territory();
+      this.pass(
+        stage4.jones,
+        this.agentsTex[flip(this.a)],
+        {
+          agentsIn: this.agentsTex[this.a].texture,
+          state: paid.state[this.st].texture,
+          paidCounts: paid.counts.texture,
+        },
+        { agentWidth },
+      );
+      this.a = flip(this.a);
+    }
     if (grow) {
       const agents = this.agentsTex[this.a];
       const points = (kind: number, dst: Target, equation: number | null, claims: WebGLTexture) => {
@@ -1518,7 +2529,7 @@ export class GlSim implements Sim {
       this.buildPyramid(p.build, g.dead, agents, 1);
       const [c, d] = [g.cells, g.dead];
       this.pass(
-        p.birth,
+        paid ? this.prog.territory().birth : p.birth,
         this.agentsTex[flip(this.a)],
         {
           agentsIn: agents.texture,
@@ -1536,6 +2547,8 @@ export class GlSim implements Sim {
         },
       );
       this.a = flip(this.a);
+      // The births of the step (paid.vert, ADR 0100).
+      if (paid) this.countPaid(paid, this.agentsTex[this.a], [MARKS.born]);
     }
     const next = col.occ[flip(this.q)];
     clear(gl, next);

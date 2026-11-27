@@ -21,6 +21,7 @@
     deadLeft,
     deviceAdjusted,
     getEngine,
+    keepTool,
     openLink,
     ruleUnavailable,
     setEngine,
@@ -111,6 +112,11 @@
     // Keep the UI consistent with what a shared link would load (e.g. collisions cap density at 1, and the Jones
     // model binds its scent to the trail).
     if (valid !== snapshot) adopt(valid);
+    // The Slime tool goes with the slime of the model (ADR 0055): without it the first tool is selected. A new tool
+    // alone runs this effect no second time.
+    untrack(() => {
+      keepTool(valid);
+    });
     getEngine()?.apply(valid).catch(fail);
   });
 
@@ -370,7 +376,7 @@
 
   function onkeydown(ev: KeyboardEvent) {
     if (ev.metaKey || ev.ctrlKey || ev.altKey || keyUsed(ev.target as HTMLElement, ev.key)) return;
-    const tool = toolsFor(app.settings.model).find((x) => x.key === ev.key);
+    const tool = toolsFor(app.settings).find((x) => x.key === ev.key);
     if (tool) app.tool = tool.id;
     else if (ev.key === 'Escape' && line.waiting) endLine();
     else if (ev.key === ' ') app.paused = !app.paused;
@@ -409,7 +415,7 @@
   <canvas
     bind:this={canvas}
     class="tool-{app.tool}"
-    aria-label="Physarum simulation. Use the toolbar to place food, light, walls, electrodes or agents."
+    aria-label="Physarum simulation. Use the toolbar to place food, light, walls, electrodes, slime or agents."
     {onpointerdown}
     {onpointermove}
     {onpointerup}

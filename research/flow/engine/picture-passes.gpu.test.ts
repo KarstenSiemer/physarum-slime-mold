@@ -126,12 +126,23 @@ it('measures the passes of the picture of the tubes alone', async () => {
         sim.run(50);
         await sim.finish();
       }
-      // The passes run when a reader asks for the picture of a stale state (sim.ts pictureTexture, gl/sim.ts
-      // pictureTarget()): here the state stays, and only the mark of the picture says that it is stale.
-      const inner = sim as unknown as { tubesStale: boolean; pictureTexture?: unknown; pictureTarget?: () => unknown };
+      // The passes run when a reader asks for the picture or the stream of a stale state (sim.ts pictureTexture and
+      // streamTexture, gl/sim.ts pictureTarget() and streamTarget()): here the state stays, and only the marks of the
+      // picture and of the stream say that they are stale. Since ADR 0095 the stream is a pass apart.
+      const inner = sim as unknown as {
+        tubesStale: boolean;
+        streamStale: boolean;
+        pictureTexture?: unknown;
+        streamTexture?: unknown;
+        pictureTarget?: () => unknown;
+        streamTarget?: () => unknown;
+      };
       const draw = (): unknown => {
         inner.tubesStale = true;
-        return kind === 'webgpu' ? inner.pictureTexture : inner.pictureTarget?.();
+        inner.streamStale = true;
+        return kind === 'webgpu'
+          ? [inner.pictureTexture, inner.streamTexture]
+          : [inner.pictureTarget?.(), inner.streamTarget?.()];
       };
       // The first pictures build the passes: not in the sample.
       for (let i = 0; i < 3; i++) draw();

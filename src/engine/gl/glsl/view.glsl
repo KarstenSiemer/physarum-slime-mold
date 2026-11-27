@@ -19,10 +19,17 @@ layout(std140) uniform View {
   // The stream of the plasm: drawn (1) or not (0), the phases of its pattern and of its swing. w is not of the stream:
   // 1 while an electrode may be painted (ADR 0047).
   vec4 streamFx;
-  vec4 gelFx;    // gel style: the white in the colour of the thinnest gel, the ground that it hides, 2 unused
+  // gel style: the white in the colour of the thinnest gel, the ground that it hides; z: 1 while the picture draws
+  // the veins (ADR 0099), in every style that draws the trail; w unused
+  vec4 gelFx;
   vec4 scentFx; // scent view: map level (0 to 3), unused, unused, unused
   vec4 scentHalf;  // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   vec4 scentHolds; // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
+  // The slime: the steps that ran so far, the life time of the slime in steps, what the frame draws (1 the film of
+  // the slime, 2 the skirt of the growth front), unused.
+  uvec4 slime;
+  vec4 slimeFx;    // the slime: the colour of its body, linear RGB, and how much of it full slime shows
+  vec4 slimeLight; // the slime: its highlight, its wide light, the height of its relief, the height of its beads
 } V;
 
 // The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
@@ -66,12 +73,15 @@ vec4 trailAt(ivec2 c) {
 ivec2 levelSize(int k) { return (gridSize() + ((1 << k) - 1)) >> k; }
 
 const float SHAPE_RANGE = 4.0; // cells; outline distances in `shape` are clamped to ± this (shape.frag)
+const int FRONT_LEVEL = 2;         // the map of the growth front has texels of 2^2 = 4 cells per side (ADR 0060)
+const float SKIRT_STEPS = 150.0;   // steps in which the skirt of a cell goes, by the factor e (5 min)
+const float SKIRT_RISE = 8.0;      // steps in which the skirt of a cell comes
 const float PRESENCE = 0.9;      // tone-curve input of an occupied food cell (render.frag presence())
 const float PRESENCE_RAMP = 1.5; // cells inside the food outline over which presence fades in
 
-// A cell of `shape`: wrapped on the periodic grid, else clamped to the arena; outside the dish, the cell inside
-// the rim on the way to the centre (see shapeIndex in render.wgsl).
-vec4 shapeAt(ivec2 c) {
+// The texel of `shape` for a grid cell: wrapped on the periodic grid, else clamped to the arena; outside the dish, the
+// cell inside the rim on the way to the centre (see shapeIndex in render.wgsl).
+ivec2 shapeTexel(ivec2 c) {
   ivec2 s = gridSize();
   ivec2 q = clamp(c, ivec2(0), s - 1);
   if (V.boundary == 0u) {
@@ -82,7 +92,12 @@ vec4 shapeAt(ivec2 c) {
     float rim = DISH_FILL * 0.5 * float(min(s.x, s.y));
     if (dot(m, m) > rim * rim) q = ivec2(floor(o + m * ((rim - 0.75) * inversesqrt(dot(m, m)))));
   }
-  return texelFetch(shape, q, 0);
+  return q;
+}
+
+// A cell of `shape` (shapeTexel()).
+vec4 shapeAt(ivec2 c) {
+  return texelFetch(shape, shapeTexel(c), 0);
 }
 
 // How much the agent in cell q (cellXY) shows on food: 0 without an agent or outside the food, rising to 1 over

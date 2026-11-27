@@ -30,7 +30,7 @@ are in the ADRs it names.
 ## Commands
 
 - `npm test` (unit), `npm run test:gpu` (both backends, headless Chromium), `npm run lint`, `npm run check`.
-- `npm run test:e2e` after `npm run build`; `npm run verify` runs all of it.
+- `npm run test:e2e` after `npm run build`; `npm run verify` runs all of it. It serves on port 4219 (`E2E_PORT`).
 - Research runs: `npx vitest run --config research/vitest.config.ts research/flow/engine/<file>` (never in `npm test`).
 - Logs: `node --import ./research/flow/register.mjs research/flow/logs.ts` unpacks `research/flow/logs.tar.gz` to
   `research/flow/logs/`; add `pack` to pack it again.
@@ -60,7 +60,9 @@ are in the ADRs it names.
   pull requests.
 - Bring `main` in with a merge, never a rebase or a force push. `git fetch origin` before a pull request and before a
   merge.
-- Squash merge only, title `<PR title> (#n)`, body only the `Signed-off-by:` line.
+- Squash merge only, title `<PR title> (#n)`, body only the `Signed-off-by:` line from `git config`. The description
+  of a pull request holds no `Signed-off-by:` line and no email address: the repository is public, and its history
+  keeps every edit.
 - Paths in `.github/CODEOWNERS` (`.github/`, `renovate.json`, `.npmrc`, `.pre-commit-config.yaml`, `scripts/`) need
   the owner's review first (ADR 0014).
 - Prettier rewrites a whole Markdown table when a new row is longer than its longest row: keep new rows shorter.
@@ -71,8 +73,10 @@ are in the ADRs it names.
   there: reproduce it in that image before a fix.
 - An e2e test waits for a number of steps, not for a time, before it reads a result of the simulation: a slow runner
   of CI makes few steps per second (`tests/e2e/tubes.spec.ts`).
-- CI shares the e2e tests out to two shards by their count, in the order of the files. A start of the app builds only
-  the passes that it runs, and a new file of tests that wait for steps can tip the shards (ADR 0049).
+- CI shares the e2e tests out to four shards by their count, in the order of the files, and runs the GPU tests in
+  four parts: by the backend in the name of a test, and `src/engine/sim.gpu.test.ts` apart from the other files
+  (ADR 0061). A start of the app builds only the passes that it runs, and a new file of tests that wait for steps can
+  tip the shards (ADR 0049).
 - Never start a server on the ports 4173, 5173 or 5001. Use another port and do not commit a change of
   `.claude/launch.json`.
 - One heavy GPU campaign at a time. WebGL2 runs slow down about 8 times beside heavy WebGPU runs. Never measure the

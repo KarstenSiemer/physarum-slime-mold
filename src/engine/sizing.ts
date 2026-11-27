@@ -1,5 +1,7 @@
 import { capacityOf, MEAN_WINDOW, meanWindowOf, RESOLUTIONS, type Lattice, type Settings } from '../model/params';
 import { flowOn, flowStrains } from './flow';
+import { slimeModel } from './slime';
+import { territoryOn } from './territory';
 import { TUBE_TILE } from './tubes';
 
 /**
@@ -80,16 +82,18 @@ export const diffusePlanOf = (s: Pick<Settings, 'diffusion' | 'model' | 'meanWin
 
 /**
  * GPU bytes per grid cell: trail 32, scent 16, counts 16, environment 4, the renderer's outline
- * distances 4, collision buffers 12, the bloom chain about 2.7, the gel height field about 2, the
- * walls' clearance 0.125 (8 B per tile of 8 × 8 cells, ADR 0020), and the two coarse maps of the view, 4 each: the
- * trail's for a view zoomed out and the scent view's (16 B per texel, a quarter of a texel per cell; render.ts,
- * gl/backend.ts). The user zooms out or turns the scent view on without a new grid, so the fit holds both maps from
- * the start (ADR 0028). WebGL2 without float blending has no collision buffers but 32 B of counting panels with a
- * stencil (gl/sim.ts deposit()); its coarse maps are the same. The electrodes (ADR 0047) lie in the fourth byte of the
- * environment's 4, which no pass used before, and the renderer reads them there: no byte more on either backend.
+ * distances 4 for walls and food and 4 for the electrodes, collision buffers 12, the bloom chain about 2.7, the gel
+ * height field about 2, the walls' clearance 0.125 (8 B per tile of 8 × 8 cells, ADR 0020), and the two coarse maps
+ * of the view, 4 each: the trail's for a view zoomed out and the scent view's (16 B per texel, a quarter of a texel
+ * per cell; render.ts, gl/backend.ts). The user zooms out or turns the scent view on without a new grid, so the fit
+ * holds both maps from the start (ADR 0028). So with the outline distances of the electrodes (ADR 0058; sim.ts
+ * `poles`, gl/sim.ts `poles`): a simulation makes them at its first pole, and a stroke must not change the grid.
+ * WebGL2 without float blending has no collision buffers but 32 B of counting panels with a stencil (gl/sim.ts
+ * deposit()); its coarse maps are the same. The electrodes themselves (ADR 0047) lie in the fourth byte of the
+ * environment's 4.
  */
-export const BYTES_PER_CELL = 98;
-export const BYTES_PER_CELL_HALF_FLOAT = 118;
+export const BYTES_PER_CELL = 102;
+export const BYTES_PER_CELL_HALF_FLOAT = 122;
 /**
  * More bytes per cell while covered food is on (ADR 0022): WebGL2 without float blending marks the cells with an agent
  * in a target of 1 B (gl/sim.ts `presence`). Elsewhere covered food counts into the collision buffers, which
@@ -134,8 +138,9 @@ export const flowBytesPerCell = (s: Pick<Settings, 'flow' | 'model' | 'strains'>
 
 /**
  * More bytes per cell for the picture of the tubes (tubes.ts, ADR 0034): per cell and strain the factor of the radius
- * of its tube, the picture, and per cell the stream of the plasm, 16 B per cell each (sim.ts TubeState, gl/sim.ts
- * `tubes`). Both backends hold the same.
+ * of its tube, the picture, and per cell the stream of the plasm for the grains, 16 B per cell each (sim.ts TubeState
+ * and StreamState, gl/sim.ts `tubes` and `stream`). Both backends hold the same. Without the picture they hold the
+ * stream alone (ADR 0095), and the fit counts all three, so the switch never changes the grid.
  */
 export const TUBES_BYTES_PER_CELL = 48;
 
@@ -154,6 +159,89 @@ export const TUBE_MAP_BYTES_PER_CELL_GL = 4 / TUBE_TILE + 4 / TUBE_TILE ** 2;
 export const tubesBytesPerCell = (s: Pick<Settings, 'flow' | 'model'>, map = 0) =>
   flowOn(s) ? TUBES_BYTES_PER_CELL + map : 0;
 
+/**
+ * More bytes per cell for the slime field and its picture (ADR 0055, decision 9; ADR 0057; ADR 0060). Both backends
+ * hold the same.
+ * - The stamp of each cell, 4 B (sim.ts `slime`, a buffer; gl/sim.ts `slime`, a target of unsigned integers).
+ * - The amount of slime of each cell, 4 B (sim.ts `amount`, a buffer; gl/sim.ts `amount`, two targets of 2 B, because
+ *   its pass reads the amounts of before a step).
+ * - The maps of the film of the renderer: 2 B per cell, and 2 B per texel of the coarse map for a view zoomed out, a
+ *   quarter of a texel per cell (render.ts, gl/backend.ts). The user turns Show slime on or zooms out without a new
+ *   grid, so the fit holds both maps from the start, as it holds the coarse maps of the trail and of the scent.
+ * - The front stamp of each cell, 4 B (sim.ts `front`, a buffer; gl/sim.ts `front`, a target of unsigned integers),
+ *   and the map of the growth front of the renderer: 4 B per texel of 4 × 4 cells (ADR 0060).
+ * That is 14.75 B, counted as 15.
+ */
+export const SLIME_BYTES_PER_CELL = 15;
+
+/**
+ * The bytes per cell of the slime field: counted in the extended model, with a Slime life time above 0 or with 0. The
+ * setting changes no grid that fits the memory. The Jones model has no slime: 0.
+ */
+export const slimeBytesPerCell = (s: Pick<Settings, 'model'>) => (slimeModel(s) ? SLIME_BYTES_PER_CELL : 0);
+
+/**
+ * More bytes per cell while the rules of stage 4 run (ADR 0067, decision 7; ADR 0068): the territory of every strain,
+ * one byte per cell in two copies, because the push writes the next one, and the owners, one byte per cell (sim.ts
+ * `territory`, textures of 4 cells per texel and a buffer of 4 cells per word; gl/sim.ts `territory`, targets of one
+ * byte per cell). Both backends hold the same.
+ */
+export const TERRITORY_BYTES_PER_CELL = 3;
+/** The bytes per cell of the rules of stage 4 of these settings: 0 while they do not run (territoryOn()). */
+export const territoryBytesPerCell = (s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions'>) =>
+  territoryOn(s) ? TERRITORY_BYTES_PER_CELL : 0;
+/**
+ * More bytes per cell and strain for the sinks while the rules of stage 4 run (ADR 0067, decision 7; ADR 0069): the
+ * sink rate of each cell and strain, 4 B, in one buffer that the pass updates in place on WebGPU (sim.ts `sinks`), and
+ * what the sink of each cell takes over its conductivity for the sensors, 4 B, a layer per strain (ADR 0075).
+ */
+export const SINK_BYTES_PER_CELL = 8;
+/**
+ * The same on WebGL2 (gl/sim.ts `sinks`): the rates in two targets of 4 B, because the pass reads the rates of before
+ * the step, and the pyramid of the sums, 16 B per texel of 4 × 4 cells and less above it, 16 / 15 B.
+ */
+export const SINK_BYTES_PER_CELL_GL = 8 + 16 / 15;
+/**
+ * The bytes per cell of the sinks of these settings: `perStrain` (Backend.sinkBytesPerCell) for every strain that has
+ * a flow of its own; 0 while the rules of stage 4 do not run (territoryOn()).
+ */
+export const sinkBytesPerCell = (
+  s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions' | 'strains'>,
+  perStrain: number,
+) => (territoryOn(s) ? perStrain * flowStrains(s) : 0);
+/**
+ * More bytes per cell on WebGL2 while the rules of stage 4 run, for what the sensors read of the flow (ADR 0075): the
+ * mean pressure and what the sink of each cell takes over its conductivity, a lane per strain in two targets of 16 B,
+ * whatever the number of strains (gl/sim.ts `sinks`). WebGPU counts its layers of the second in SINK_BYTES_PER_CELL
+ * and reads the pressure of the flow.
+ */
+export const DRIFT_BYTES_PER_CELL_GL = 32;
+/** The bytes per cell of the drift of these settings: `bytes` (Backend.driftBytesPerCell) while the rules run. */
+export const driftBytesPerCell = (
+  s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions'>,
+  bytes: number,
+) => (territoryOn(s) ? bytes : 0);
+/**
+ * More bytes per agent while the rules of stage 4 run (ADR 0067, decision 7; ADR 0071): the key of the births that the
+ * flux pays, a float per agent (sim.ts after the state of the sinks, gl/sim.ts a target of the agents). Both backends
+ * hold the same.
+ */
+export const PAID_BYTES_PER_AGENT = 4;
+/** The bytes per agent of the paid births of these settings: 0 while the rules of stage 4 do not run. */
+export const paidBytesPerAgent = (s: Pick<Settings, 'territory' | 'flow' | 'model' | 'growth' | 'collisions'>) =>
+  territoryOn(s) ? PAID_BYTES_PER_AGENT : 0;
+/**
+ * The sides of the levels of a pyramid of sums over squares of 4 × 4 on a grid of `w` × `h` cells (sinks.frag PASS 1 and
+ * 2), from the first level to the top of one texel.
+ */
+export function sinkLevels(w: number, h: number): [number, number][] {
+  const out: [number, number][] = [];
+  do {
+    [w, h] = [Math.ceil(w / 4), Math.ceil(h / 4)];
+    out.push([w, h]);
+  } while (w > 1 || h > 1);
+  return out;
+}
 /** Whether the view needs its third trail texture (VIEW_BYTES_PER_CELL). */
 export const viewTrailOn = (s: Pick<Settings, 'stepOrder' | 'diffusion' | 'model' | 'meanWindow'>) =>
   s.stepOrder === 'move-first' && diffusePlanOf(s).length >= 2;

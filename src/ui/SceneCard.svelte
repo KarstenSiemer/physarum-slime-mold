@@ -42,6 +42,7 @@
     coarsening: 'The model',
     tsuda: 'Physarum',
     voronoi: 'The model',
+    reid: 'Physarum',
     app: 'Scenes',
   };
 </script>

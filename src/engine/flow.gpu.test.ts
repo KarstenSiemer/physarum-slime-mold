@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { packDrawing, unpackDrawing } from '../model/link';
 import { defaultSettings, defaultStrain, type Boundary, type Settings, type Strain } from '../model/params';
 import { fromStroke, strokeOn } from './environment';
-import { FLOW, packFlow } from './flow';
+import { FLOW, FLOW_EIGHT, packFlow } from './flow';
 import { at } from './at';
 import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowFields, type FlowGrid } from './flow-reference';
 import { WebGl2Backend } from './gl/backend';
@@ -92,11 +92,11 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
 
   /**
    * Six steps of the flow of the strain `strain` of a scene with the strains `strains`, against the CPU reference: the
-   * memory and the pressure of every step.
+   * memory and the pressure of every step. `patch`: settings over those of the scene, as the neighbours of the flow.
    */
-  async function followsReference(strains: Strain[], strain: number) {
+  async function followsReference(strains: Strain[], strain: number, patch: Partial<Settings> = {}) {
     const [w, h] = [48, 40];
-    const settings = flowing({ strains });
+    const settings = flowing({ strains, ...patch });
     const sim = await make(settings, w, h, 500);
     // A wall with a gap, painted over foods on either side of it. The first food of the list lies under the wall, a
     // dab of one cell: it never gives or takes, and the passes recentre the pressure by the next food. The second food
@@ -184,6 +184,12 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     await followsReference(four, 3);
   }, 120_000);
 
+  // ADR 0086: over 8 neighbours, with the base conductance of the crown. The wall has two ends, whose corners no
+  // diagonal edge passes, and a dab under it.
+  it('follows the CPU reference over 8 neighbours, with the base conductance 0.002', async () => {
+    await followsReference([{ ...defaultStrain(0), sensorOffset: 5 }], 0, { flowEdges: 8, flowBase: 0.002 });
+  }, 120_000);
+
   it('follows the CPU reference for the second of two strains, with the trail and the deposit of that strain', async () => {
     // The second strain deposits 2 where the first deposits 5: the levels of its trail are 0.4 and 2, not 1 and 5.
     const second = { ...defaultStrain(1), sensorOffset: 5, deposit: 2 };
@@ -196,6 +202,8 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
    * the trail of the strain `lane`, and `other` in the trail of the next strain. Its agents start dead, and the flow
    * brings them to life on a fed tube: with a deposit of 0 they leave no trail of their own. The memory, the pressure
    * and the flux that it gives are those of the flow of the strain `lane`; `of()` gives those of another strain.
+   * `walls`: strokes of walls, painted after the foods; `patch`: settings over those of the case, as the neighbours of
+   * the flow (ADR 0086).
    */
   async function tubes(
     lines: readonly Line[],
@@ -206,6 +214,16 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       lane = 0,
       other = [] as readonly Line[],
       foods = [dab([4.5, 12.5], 0.75), dab([35.5, 12.5], 0.75)] as readonly FoodStroke[],
+      walls = [] as readonly Stroke[],
+      patch = {},
+    }: {
+      strains?: number;
+      agents?: number;
+      lane?: number;
+      other?: readonly Line[];
+      foods?: readonly FoodStroke[];
+      walls?: readonly Stroke[];
+      patch?: Partial<Settings>;
     } = {},
   ) {
     const [w, h] = [40, 24];
@@ -215,9 +233,11 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
       diffusion: 0,
       flowStrength: 2,
       strains: Array.from({ length: strains }, (_, i) => ({ ...defaultStrain(i), decay: 0.0001, deposit: 0 })),
+      ...patch,
     });
     const sim = await make(settings, w, h, agents);
     const sites = feed(sim, foods);
+    if (walls.length > 0) sim.paint([...walls]);
     sim.reset();
     const cells = (list: readonly Line[]) => {
       const set = new Set<number>();
@@ -238,7 +258,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const grid: FlowGrid = { width: w, height: h, boundary: 'box', env: await sim.readEnv() };
     const of = async (strain: number) => {
       const [memory, pressure] = [await sim.readFlow(strain), await sim.readPressure(strain)];
-      return { memory, pressure, flux: flowFlux(grid, memory, pressure) };
+      return { memory, pressure, flux: flowFlux(grid, memory, pressure, settings.flowEdges === 8) };
     };
     return { sim, w, tube, grid, sites, cells, i0: settings.flowStrength, of, ...(await of(lane)) };
   }
@@ -731,6 +751,104 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     expect(expected[8]).toBe(fresh);
   }, 240_000);
 
+  it('lets starved ground recover in the Slime life time: with eight times the share at 18 hours', async () => {
+    // ADR 0055, decision 5: the setting gives the mark of starved ground its time. The ground of the test before, with
+    // the share of each life time: FLOW.recover at 144 hours, 0.00023 at 18 hours, and FLOW.recover without slime.
+    const [w, h] = [20, 8];
+    const starts = [0, FLOW.floor, 0.001, FLOW.half, 0.05, 0.1, 0.19, FLOW.fresh, 0.5, 1];
+    const f = Math.fround;
+    const [fresh, floor] = [f(FLOW.fresh), f(FLOW.floor)];
+    for (const [slimeLife, share] of [
+      [18, 0.00023],
+      [72, 2 * FLOW.recover],
+      [144, FLOW.recover],
+      [0, FLOW.recover],
+    ] as const) {
+      const sim = await make(flowing({ slimeLife }), w, h, 32, 0);
+      const memory = new Float32Array(w * h * 4);
+      for (let c = 0; c < w * h; c++) memory.set([starts[c % starts.length] ?? 0, 0, 0, 0], c * 4);
+      sim.writeFlow(memory);
+      sim.run(300);
+      const factor = f(1 + f(share));
+      const expected = starts.map(f);
+      for (let s = 0; s < 300; s++)
+        expected.forEach((d, i) => {
+          expected[i] = f(Math.min(fresh, f(Math.max(d, floor) * factor)));
+        });
+      const got = await sim.readFlow();
+      for (let c = 0; c < w * h; c++) {
+        const want = expected[c % starts.length] ?? 0;
+        const what = `column ${String(c % w)}, ${String(slimeLife)} hours`;
+        expect(Math.abs((got[c * 4] ?? 0) - want) / want, what).toBeLessThan(1e-4);
+      }
+      // The floor after 300 steps: 7 % above itself at 18 hours, and 0.9 % at 144 hours.
+      expect((expected[1] ?? 0) / FLOW.floor, `${String(slimeLife)} hours`).toBeCloseTo((1 + share) ** 300, 3);
+    }
+    expect(1.00023 ** 300).toBeGreaterThan(1.07);
+    expect((1 + FLOW.recover) ** 300).toBeLessThan(1.009);
+  }, 240_000);
+
+  it('leaves the ground of a starved tube that vanishes at the floor of the flow memory', async () => {
+    // ADR 0054. No agent lives, so no trail: the tube body of a cell falls by the share FLOW.bodyRate per step, and a
+    // cell loses its tube in the step in which its body falls below FLOW.bodyLow. No food: no tube adapts. The column of
+    // a cell gives its flow memory at the start. The rows 0 and 1 hold a tube that vanishes in the first step, the rows
+    // 2 and 3 a tube that vanishes in the tenth step, and the other rows ground without a tube.
+    const [w, h] = [18, 8];
+    const starts = [FLOW.floor, 0.001, 0.005, FLOW.half * 0.99, FLOW.half * 1.01, 0.05, 0.19, FLOW.fresh, 0.5];
+    const bodies = [0.0505, 0.0505, 0.06, 0.06, 0, 0, 0, 0];
+    const sim = await make(flowing(), w, h, 32, 0);
+    const memory = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++)
+      memory.set([starts[c % starts.length] ?? 0, bodies[Math.floor(c / w)] ?? 0, 0, 0], c * 4);
+    sim.writeFlow(memory);
+    // The rule in float32, as the passes compute it: the memory and the tube body of every cell.
+    const f = Math.fround;
+    const [fresh, floor, factor] = [f(FLOW.fresh), f(FLOW.floor), f(1 + f(FLOW.recover))];
+    const [low, rate, half2] = [f(FLOW.bodyLow), f(FLOW.bodyRate), f(FLOW.half * FLOW.half)];
+    const cells = Array.from({ length: w * h }, (_, c) => ({
+      d: f(starts[c % starts.length] ?? 0),
+      body: f(bodies[Math.floor(c / w)] ?? 0),
+    }));
+    const step = () => {
+      for (const cell of cells) {
+        const tube = cell.body >= low;
+        if (!tube) cell.d = f(Math.min(fresh, f(Math.max(cell.d, floor) * factor)));
+        const body = f(cell.body + f(rate * f(0 - cell.body)));
+        if (tube && body < low && f(cell.d * cell.d) < half2) cell.d = floor;
+        cell.body = body;
+      }
+    };
+    let done = 0;
+    for (const steps of [1, 1, 7, 1, 1, 40]) {
+      sim.run(steps);
+      for (let s = 0; s < steps; s++) step();
+      done += steps;
+      const got = await sim.readFlow();
+      cells.forEach((want, c) => {
+        const what = `cell ${String(c)}, step ${String(done)}`;
+        expect(Math.abs((got[c * 4] ?? 0) - want.d) / want.d, `memory of ${what}`).toBeLessThan(1e-4);
+        expect((got[c * 4 + 1] ?? 0) >= low, `tube of ${what}`).toBe(want.body >= low);
+      });
+      // The cells of the first columns are starved: FLOW.floor to just below FLOW.half.
+      const starved = (row: number) => [0, 1, 2, 3].map((x) => got[(row * w + x) * 4]);
+      const fed = (row: number) => [4, 5, 6, 7, 8].map((x) => got[(row * w + x) * 4]);
+      // A starved tube that vanished holds the floor in the step in which it vanishes, and it recovers from there.
+      if (done === 1) expect(starved(0)).toEqual([floor, floor, floor, floor]);
+      // A tube that is not starved keeps its memory when it vanishes; the step after, a memory above fresh ground falls
+      // to fresh ground (ADR 0029, decision 7).
+      if (done === 1) expect(fed(0)).toEqual([4, 5, 6, 7, 8].map((x) => f(starts[x] ?? 0)));
+      if (done === 2) expect(fed(0)[4]).toBe(fresh);
+      // A starved tube keeps its memory while it stands, and falls to the floor in the step in which it vanishes.
+      if (done === 9) expect(starved(2)).toEqual([0, 1, 2, 3].map((x) => f(starts[x] ?? 0)));
+      if (done === 10) expect(starved(2)).toEqual([floor, floor, floor, floor]);
+      // Starved ground without a tube does not fall: it recovers from its own memory.
+      if (done === 1) expect((starved(5)[2] ?? 0) / f(0.005)).toBeCloseTo(1 + FLOW.recover, 6);
+    }
+    // 51 steps after the start the ground of the first tubes has recovered by the factor of the rule for 50 steps.
+    expect(cells[2]?.d).toBeCloseTo(FLOW.floor * (1 + FLOW.recover) ** 50, 8);
+    expect(cells[2]?.d).toBeLessThan(0.001);
+  }, 240_000);
+
   it('lets a food give or take only when a tube covers it and one more food, and keeps the memory until then', async () => {
     // A tube from the first food that ends before the second food: one covered food alone has no role.
     const { tube, memory, pressure } = await tubes(
@@ -859,6 +977,87 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     // Both together carry the flux I0 (the pressure lags the memory by a few per cent while the tubes compete).
     expect(((flux[short * 4] ?? 0) + (flux[long * 4] ?? 0)) / i0).toBeGreaterThan(0.93);
     expect(((flux[short * 4] ?? 0) + (flux[long * 4] ?? 0)) / i0).toBeLessThan(1.07);
+  }, 240_000);
+
+  // ADR 0086: the flow over 8 neighbours. A vein of one cell along a diagonal, from the food at (4, 2) to the food at
+  // (25, 23): its cells share only corners, so with 4 neighbours no flux runs along it, and with 8 the whole flux does.
+  const vein = Array.from({ length: 22 }, (_, i) => [4 + i, 2 + i, 4 + i, 2 + i] as const);
+  const veinFoods = [dab([4.5, 2.5], 0.75), dab([25.5, 23.5], 0.75)];
+
+  it('carries the whole flux along a diagonal vein of one cell over 8 neighbours, and none over 4', async () => {
+    const eight = await tubes(vein, 1500, { foods: veinFoods, patch: { flowEdges: 8 } });
+    const { w, memory, pressure, grid, i0, flux } = eight;
+    // Kirchhoff over the 8 edges with their weights: what leaves each cell of the vein is what it gives or takes.
+    const [axis, diag] = [Math.fround(FLOW_EIGHT.axis), Math.fround(FLOW_EIGHT.diag)];
+    const edge = (a: number, b: number) => (a <= 0 || b <= 0 ? 0 : (2 * a * b) / (a + b));
+    let worst = 0;
+    for (const c of eight.tube) {
+      const [x, y] = [c % w, Math.floor(c / w)];
+      const signs = roleSigns(memory[c * 4 + 3] ?? 0);
+      for (let k = 0; k < 4; k++) {
+        let net = 0;
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+          [1, 1],
+          [-1, -1],
+          [-1, 1],
+          [1, -1],
+        ] as const) {
+          const nb = openCell(grid, x + dx, y + dy);
+          const diagonal = dx !== 0 && dy !== 0;
+          if (nb < 0 || (diagonal && (openCell(grid, x + dx, y) < 0 || openCell(grid, x, y + dy) < 0))) continue;
+          const g = (diagonal ? diag : axis) * edge(memory[c * 4 + 2] ?? 0, memory[nb * 4 + 2] ?? 0);
+          net += g * ((pressure[c * 4 + k] ?? 0) - (pressure[nb * 4 + k] ?? 0));
+        }
+        worst = Math.max(worst, Math.abs(net - (signs[k] ?? 0) * i0));
+      }
+    }
+    expect(worst / i0).toBeLessThan(0.01);
+    // The flux of a cell reads I0 on the vein, and its memory goes to Tero's f(I0), as along an axis.
+    const f = i0 ** FLOW.gamma / (1 + i0 ** FLOW.gamma);
+    for (const i of [5, 10, 15]) {
+      const c = (2 + i) * w + 4 + i;
+      expect(flux[c * 4] ?? 0, `cell ${String(i)}`).toBeCloseTo(i0, 2);
+      expect(memory[c * 4] ?? 0, `cell ${String(i)}`).toBeGreaterThan(f - 0.012);
+      expect(memory[c * 4] ?? 0, `cell ${String(i)}`).toBeLessThan(f + 0.002);
+    }
+    // With 4 neighbours the cells of the vein touch no tube: no flux, and the vein starves.
+    const four = await tubes(vein, 800, { foods: veinFoods });
+    for (const i of [5, 10, 15]) {
+      const c = (2 + i) * w + 4 + i;
+      expect(four.flux[c * 4] ?? 0, `cell ${String(i)}`).toBe(0);
+      expect(four.memory[c * 4] ?? 0, `cell ${String(i)}`).toBeLessThan(0.3 * FLOW.fresh);
+    }
+  }, 240_000);
+
+  it('lets no diagonal edge pass the corner of a wall over 8 neighbours', async () => {
+    // A wall of one cell beside one step of the vein, at (14, 11) between its cells (13, 11) and (14, 12): the step
+    // has no edge, so no tube joins the two foods, and both stop at their pressure limit. Along the vein runs only
+    // what leaks through the ghost conductance of the open ground beside the gap, against the whole I0 without the
+    // wall (the test above), so its memory falls below that of fresh ground.
+    const walls: Stroke[] = [{ kind: 'wall', from: [14.5, 11.5], to: [14.5, 11.5], radius: 0.5 }];
+    const { w, memory, pressure, grid, i0, flux } = await tubes(vein, 600, {
+      foods: veinFoods,
+      walls,
+      patch: { flowEdges: 8 },
+    });
+    expect(openCell(grid, 14, 11)).toBe(-1);
+    for (const [x, y] of [
+      [13, 11],
+      [14, 12],
+      [13, 12],
+    ] as const)
+      expect(openCell(grid, x, y), `cell (${String(x)}, ${String(y)})`).toBe(y * w + x);
+    const span = (pressure[(2 * w + 4) * 4] ?? 0) - (pressure[(23 * w + 25) * 4] ?? 0);
+    expect(Math.abs(span)).toBeGreaterThan(1.9 * FLOW.head * i0);
+    for (const i of [3, 7, 13, 17]) {
+      const c = (2 + i) * w + 4 + i;
+      expect(flux[c * 4] ?? 0, `cell ${String(i)}`).toBeLessThan(0.2 * i0);
+      expect(memory[c * 4] ?? 0, `cell ${String(i)}`).toBeLessThan(FLOW.fresh);
+    }
   }, 240_000);
 
   it('brings a dead agent to life only on a tube of its own strain', async () => {

@@ -1,11 +1,16 @@
 // The picture of the tubes (ADR 0034), after common.glsl. Mirrors ../../shaders/tubes.wgsl, where the passes are
 // described: PASS 0 is `roots` (per cell and strain the factor of the radius of its tube), PASS 1 is `picture` (the
-// trail that the view draws), PASS 2 is `stream` (per cell the direction of the flow of the plasm times its speed).
-// PASS 3 and PASS 4, the map of the tiles, run between PASS 0 and PASS 1: per tile of TILE × TILE cells what the
-// window of the tile holds, which a workgroup of `picture` finds in its own memory (ADR 0034, amendment of 2026-11-15).
+// trail that the view draws), PASS 2 is `stream` (per cell the direction of the flow of the plasm times its speed, for
+// the grains, which show with the picture or without it: ADR 0095). PASS 3 and PASS 4, the map of the tiles, run
+// between PASS 0 and PASS 1: per tile of TILE × TILE cells what the window of the tile holds, which a workgroup of
+// `picture` finds in its own memory (ADR 0034, amendment of 2026-11-15).
 // The window is a rectangle of cells, so PASS 3 looks along the rows and PASS 4 along the columns: one pass of 14 × 14
 // reads per tile took 0.6 ms more on the Tokyo rail network than the skip saves there.
-// programs.ts defines RADIUS, EDGE, SHEET, SPAN, BODY_LOW, FAST, TILE and WINDOW from ../../tubes.ts.
+// programs.ts defines RADIUS, EDGE, SHEET, SPAN, BODY_LOW, FAST, TILE and WINDOW from ../../tubes.ts, and EIGHT for the
+// stream over 8 neighbours (ADR 0086; `//#if EIGHT` in ../../shaders/tubes.wgsl).
+#ifndef EIGHT
+#define EIGHT 0
+#endif
 
 out vec4 result;
 
@@ -188,6 +193,18 @@ uniform sampler2D flowPressure1;
 uniform sampler2D flowPressure2;
 uniform sampler2D flowPressure3;
 
+#if EIGHT
+// The weights of an axis edge and of a diagonal edge over 8 neighbours (AXIS and DIAG in tubes.wgsl, ADR 0086).
+const float AXIS = 0.414213568; // √2 − 1
+const float DIAG = 0.292893231; // 1 − 1/√2
+
+// Whether the cell at q (not wrapped) is open for the flow: in the arena and no cell of a wall (flowOpen in tubes.wgsl).
+bool flowOpen(ivec2 q) {
+  ivec2 c = cellXY(q);
+  return c.x >= 0 && !isWall(texelFetch(shape, c, 0));
+}
+#endif
+
 // The stream of the plasm of one strain through the cell p: xy its direction, z its speed (streamOf in tubes.wgsl).
 vec3 streamOf(sampler2D memory, sampler2D pressure, ivec2 p) {
   float g = texelFetch(memory, p, 0).z;
@@ -207,6 +224,25 @@ vec3 streamOf(sampler2D memory, sampler2D pressure, ivec2 p) {
     x += float(o.x) * leaves;
     y += float(o.y) * leaves;
   }
+#if EIGHT
+  // Over 8 neighbours: the axis edges with the weight AXIS, and the 4 diagonal edges with DIAG where both cells beside
+  // the edge are open (streamOf in tubes.wgsl).
+  flux *= AXIS;
+  x *= AXIS;
+  y *= AXIS;
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2(1 - 2 * (k & 1), 1 - 2 * (k >> 1)); // south-east, south-west, north-east, north-west
+    if (!flowOpen(p + ivec2(o.x, 0)) || !flowOpen(p + ivec2(0, o.y))) continue;
+    ivec2 n = cellXY(p + o);
+    if (n.x < 0) continue;
+    float gn = texelFetch(memory, n, 0).z;
+    if (gn <= 0.0) continue;
+    vec4 leaves = DIAG * (2.0 * g * gn / (g + gn)) * (own - texelFetch(pressure, n, 0));
+    flux += abs(leaves);
+    x += float(o.x) * leaves;
+    y += float(o.y) * leaves;
+  }
+#endif
   int lane = 0;
   for (int k = 1; k < 4; k++) {
     if (flux[k] > flux[lane]) lane = k;

@@ -197,6 +197,64 @@ its ground at the floor of the flow memory. It is not built, because it changes 
 flow memory: the owner decides. The rule that the plan has for the slime, a lower weight for
 marked ground in the pick of a birth, changes nothing in a dead end: there every free neighbour
 has the mark.
+**A starved tube leaves starved ground**
+([ADR 0054](../../docs/adr/0054-a-starved-tube-leaves-starved-ground.md), part 18). The owner read
+that result and asked for a fix that reaches the aim. So that one rule ran in runs of 80,000 steps.
+The blind branches of the Snail maze were empty for 10,000 steps, and then the colony came back:
+the mark had faded, 20,025 steps after the ground had closed. A wider mark, on every ground that a
+tube left, did the same, and it cost the Tokyo scene its regrowth. So every mark that fades lets
+the colony come back when it has faded, and its time decides. The papers give no life time of the
+slime; the longest avoidance that one of them reports is 6 days. With the rule and a mark of 6
+days in place of 18 h, ten seeds of each maze ran again: a blind branch of the Snail maze holds
+0.4 % of the trail of the route, where it held 17.6 %, no child is born in the dead ends, and the
+tube joins the foods as before. Runs of 220,000 steps show the end of the mark: after 160,182 steps
+each blind branch fills once, for 1,000 to 3,000 steps, and it is closed again. What stays beside
+the tube are short twigs: agents walk onto closed ground and starve there, because the mark stops
+births and no moves. The long mark makes the Tokyo network leaner, so its flow strength was chosen
+again, as ADR 0029 chose it: 2.8 in place of 1.4 gives the total length of the organism at the
+time of its experiment. Both are choices of the coordinator, and the owner can change them.
+**The slime field** ([ADR 0055](../../docs/adr/0055-the-slime-field.md), part 19). The plasmodium
+leaves slime where it was, and the plan gives the model a field for it. The extended model now
+keeps, for every cell, the step in which the cell last held plasm. A cell has slime for the
+setting Slime life time after that step, 144 hours at the start. A brush paints slime, and the
+picture shows the slime as a pale layer on the ground. The slime and the mark of starved ground
+are two fields, as the organism has two cues, and the same setting gives the mark its time. No
+rule reads the slime yet: every scene keeps its bytes, and with 18 hours the Snail maze gives the
+runs of ADR 0054 with 18 h, line for line. The rule of avoidance comes next, after a measurement
+in a Y-maze: a lower weight in the pick of a birth acts only where blank ground meets slime, so
+its design is not safe without that measurement.
+**The Y-maze** ([ADR 0056](../../docs/adr/0056-the-avoidance-of-slime-waits-for-the-growth-front.md),
+part 20). Reid et al. 2012 let plasmodia choose between an arm with slime and a blank arm. 39 of
+40 took the blank arm, with slime on both arms they had no preference, and slime did not slow
+them. A Y-maze of that size ran here as research code, with 40 seeds. The app has no preference:
+19 to 20. The rule of the plan, a lower weight for slime in the pick of a birth, gives 26 to 11,
+and no rule of the births does better. Agents that walk carry the front: they cross an arm of 4 cm
+in 65 steps, and the children follow them. A rule for the moves gives 40 to 0, and no preference
+with slime on both arms. But its colony then needs 233 steps to the food in place of 65: the
+choice of that rule comes from a slower colony, and the plasmodium is not slower. So no rule is
+built. The plasmodium chooses as one body, whose plasm goes to the part of its front that moves
+on, and the model gets that with the growth front of stage 4.
+**The film of the slime** ([ADR 0057](../../docs/adr/0057-the-film-of-the-slime.md), part 21). The
+owner looked at the pale layer of the slime and found it flat and jagged. The stamp says when
+plasm was in a cell, not how much, and a colony covers most ground once: the layer was the same
+everywhere. The slime field now also holds an amount of slime per cell, for the picture alone. A
+cell under a full tube gains 1 of 4,095 per step, up to the level of its plasm. So the amount is
+high where a tube stayed, and the picture draws a wet film that keeps the shape of the tube. The
+organism leaves the coat of slime of a tube behind in the same way. An amount that grows fast is
+flat, as the stamp is: with a sum that is full after 500 steps, 96.5 % of the cells with slime
+are above 0.9 after 22,000 steps of the Snail maze. With the rule, 16.4 % are. No run changes.
+**The growth front in the picture** ([ADR 0060](../../docs/adr/0060-the-growth-front-in-the-picture.md),
+part 22). A real slime mold has a sheet at its front, then fine veins, then one tube. The model
+grows arms of full plasm with blunt ends, so its picture had none of that. The slime field now
+holds a front stamp per cell: the step at which plasm came onto ground without slime. Plasm that
+comes back onto slime gets no new stamp. Such plasm is no front, as a birth there will be no sink
+of the flow in stage 4. The picture reads the age of the stamp. Around young ground it draws a
+skirt: a thin clear veil of slime below the plasm, which a cell joins over about 20 steps and
+leaves with 150. The first build drew a sheet and a net of fine veins from a pattern. The owner
+took the veins out: in the organism they form in the crown at the head of a tube, so the model
+must grow them, and that is stage 4. This is a picture: the model grows no sheet. Two faults of
+the picture went on the way: the film of the slime lay over the tubes, and the edge of the gel
+had a tooth for each cell. No run changes.
 
 ## What is in this folder, and what you need to read
 
@@ -204,10 +262,10 @@ has the mark.
 | -------------------------------------------------- | ----------- | ------------------------------------------------------- |
 | This page, up to here                              | 1 page      | yes: it is the whole story                              |
 | The ADR, section "The solvers and the mathematics" | 300 lines   | if you want the formulas                                |
-| The rest of this page                              | 1,150 lines | only to run a step again: it is a list of commands      |
+| The rest of this page                              | 1,900 lines | only to run a step again: it is a list of commands      |
 | `prototype/`                                       | 3,300 lines | no: the CPU program that compared the three solvers     |
 | `solvers.ts`, `rules.ts`, `bounded.ts`, `engine/`  | 3,200 lines | no: the scripts that made the other numbers of the ADR  |
-| `logs.tar.gz`                                      | 0.5 MB      | never: the raw output of the runs, which a script reads |
+| `logs.tar.gz`                                      | 1.4 MB      | never: the raw output of the runs, which a script reads |
 | `summary.ts`                                       | 470 lines   | no: it makes the tables of the ADR from the logs        |
 | `research.test.ts`                                 | 300 lines   | no: it checks that the scripts still give the same rows |
 
@@ -988,7 +1046,7 @@ RULE=largest WINDOW=4 REF=3 PANELS=view node --import ./research/flow/register.m
 The pictures of the app with the switch off and on (3 minutes), written to
 `test-results/pictures/`. A file has the name of its scene, its step, its style, and `off` or
 `on`. You must see what "The pictures" of the ADR says for each scene. The command starts the
-built app on port 4173:
+built app on port 4219 (`E2E_PORT`):
 
 ```bash
 npm run build && npx playwright test --project=pictures tests/pictures/tubes.spec.ts
@@ -1346,7 +1404,7 @@ of seeds, and it loses a food source more often.
 ### 13. How long does starved ground stay closed? [ADR 0029, amendment 2026-11-15 (2)]
 
 A run with another time sets the share by which the flow memory of ground without a tube grows per
-step, `VITE_RECOVER` (`FLOW.recover`, 0.00023 in the app): 0.00023, 0.00035, 0.0007, 0.0014 and
+step, `VITE_RECOVER` (`FLOW.recover`; 0.00023 in the app then, 0.00002875 since ADR 0054): 0.00023, 0.00035, 0.0007, 0.0014 and
 0.0042 take 18.4, 12.1, 6.0, 3.0 and 1.0 h of model time from the floor to fresh ground. With
 `VITE_GROUND=1` a run also writes the flow memory of every cell, which `engine/strands.ts` reads.
 The logs of the record are in `logs/engine/recover/`; their names say the time, `r18` for 18 h.
@@ -1580,6 +1638,10 @@ The dead ends thin out but do not empty, because growth goes on (ADR 0051 has th
 
 ### 17. Does the colony stay out of the dead ends when no child is born onto starved ground? [ADR 0053]
 
+The records of this part are those of the app at the commit `02c3772`. Since ADR 0054 the mark of
+starved ground is another one (part 18), so the commands of this part give these records only in a
+checkout of that commit.
+
 **Where children are born.** The Snail maze, stepped one step at a time for 300 steps from the steps
 12,000, 20,000 and 28,000. Each child counts by the flow memory of its cell: starved (below 0.01),
 open (0.01 to 0.5) or fed (above 0.5). A run takes 1 minute.
@@ -1609,9 +1671,11 @@ for seed in 1 2 3; do VITE_SCENE=snail-maze VITE_SEED=$seed VITE_AT=12000,20000,
 `measure-mazes.ts` are the records `snail-maze-webgpu.txt`, `corn-maze-webgpu.txt` and the two of
 WebGL2.
 
-**Other rules.** `variant.ts` has seven of them; its head says what each one is. The Snail maze with
-each, seeds 1 to 3, with the dumps of the last 10,000 steps only (15 minutes in all). The line of a
-run is then the line of a full run but for `joined at`:
+**Other rules.** `variant.ts` had seven of them when this part ran, at the commit `02c3772`; its
+head there says what each one is. Since ADR 0054 the variant `floor` is the rule of the app (part
+18), so run the commands of this paragraph in a checkout of that commit. The Snail maze with each,
+seeds 1 to 3, with the dumps of the last 10,000 steps only (15 minutes in all). The line of a run
+is then the line of a full run but for `joined at`:
 
 ```bash
 STEPS=$(seq -s, 20500 500 30000 | sed 's/,$//'); for v in parent child left weight floor left+floor parent+floor; do for seed in 1 2 3; do VITE_SCENE=snail-maze VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g53-snail-maze-$v-s$seed node --import ./research/flow/register.mjs research/flow/engine/variant.ts $v npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
@@ -1643,7 +1707,7 @@ node --import ./research/flow/register.mjs research/flow/summary.ts engine-tokyo
 The record of before is `logs/engine/tokyo-flux1.4-sites.txt`; the same command prints its summary.
 The same runs with `VITE_SCENE=tokyo-light` (seeds 1 to 3, `LIT=tokyo-light` before
 `measure-tokyo.ts`), with `VITE_KIND=webgl2` to step 24,000 (seeds 1 to 3), and with the variant
-`floor` (seeds 1 to 3, the command with `variant.ts floor` before `npx`).
+`floor` (seeds 1 to 3, the command with `variant.ts floor` before `npx`, in a checkout of `02c3772`).
 
 **The bytes of the scenes.** The digests of every scene after 500 steps on both backends, with the
 state of the flow (3 minutes), on the branch and on `main` on the same machine:
@@ -1677,8 +1741,8 @@ node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SG1 SG
 The regrowth of part 13, the foods of four cities away from step 24,000 to step 27,000, with the
 rule and with the variant `floor` (seeds 1 to 3, names `g53-starve-rule-s<seed>` and
 `g53-starve-floor-s<seed>`): the second command of the regrowth in part 13 without `VITE_RECOVER`,
-and for `floor` with `variant.ts floor` before `npx`. `summary.ts regrowth` with the two files of a
-rule and the step 27000 prints when the foods are joined again.
+and for `floor` with `variant.ts floor` before `npx`, at `02c3772`. `summary.ts regrowth` with the
+two files of a rule and the step 27000 prints when the foods are joined again.
 
 Result: the rule stops every birth onto a starved cell, a third of the births in the dead ends,
 and it changes no measure of the mazes or of the Tokyo scenes. The dead ends do not empty. Of the
@@ -1700,9 +1764,1211 @@ other rules only `floor` empties them (ADR 0053 has the tables). The records are
 | `digest-3000-branch.jsonl`, `digest-3000-main`    | the same after 3,000 steps for the seven scenes with growth and the flow          |
 | `mutations.txt`                                   | the wrong rules SG1 to SG10, G1, G2, F8, F13 and F16, and the tests that fail     |
 
+### 18. Does the colony stay out of the dead ends when the mark is the same everywhere and lasts? [ADR 0054]
+
+Since ADR 0054 a starved tube that vanishes leaves its ground at the floor of the flow memory, and
+starved ground is fresh again after 6 days (`FLOW.recover` in `src/engine/flow.ts`). `VITE_RECOVER`
+of `dump.gpu.test.ts` sets another time for a run: 0.00023 is the 18 h of before.
+
+**The analysis: which mark, and for how long.** The Snail maze and the Corn maze to step 80,000,
+seeds 1 to 3 (2.5 minutes per run), with the time of before:
+
+```bash
+STEPS=$(seq -s, 500 500 80000 | sed 's/,$//'); for scene in snail-maze corn-maze; do for seed in 1 2 3; do VITE_RECOVER=0.00023 VITE_SCENE=$scene VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g54-$scene-floor-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; done
+```
+
+```bash
+for scene in snail-maze corn-maze; do WINDOW=10000 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene $(for seed in 1 2 3; do echo g54-$scene-floor-s$seed; done) | grep window; done
+```
+
+`WINDOW=10000` makes `measure-mazes.ts` print one line per window of 10,000 steps. With the time
+of before you must see `blind` below 0.03 in the window 30000 of the Snail maze and above 0.10 in
+the window 40000: the colony comes back when the mark has faded. The same runs with the variant
+`mark` (the command with `node --import ./research/flow/register.mjs research/flow/engine/variant.ts mark`
+before `npx`, names `g54-<scene>-mark-s<seed>`), and where the children are born with each
+(`births.gpu.test.ts` as in part 17 with `VITE_RECOVER=0.00023`, names `g54-births-floor-s<seed>`
+and `g54-births-mark-s<seed>`; then `births.ts` with `RECOVER=0.00023` before `node`).
+
+The Tokyo scene with the mark of the app and the flow strengths of before, 1.4, and 2 (the scene
+has 2.8 since ADR 0054), seeds 1 to 3. The runs with 1.4 of the record go on to step 96,000, with
+a sample every 8,000 steps:
+
+```bash
+for i0 in 1.4 2; do for seed in 1 2 3; do VITE_I0=$i0 VITE_GROUND=1 VITE_SCENE=tokyo VITE_SEED=$seed VITE_STEPS=1000,2000,4000,8000,12000,16000,24000,32000,40000,48000 VITE_NAME=g54-tokyo-floor6d-i$i0-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g54-tokyo-floor6d-i$i0-s$seed 1.5 99999 >> research/flow/out/g54-tokyo-floor6d-i$i0.txt; done; done
+```
+
+The records of the analysis are the files `analysis-*` of `logs/engine/mark/`. They ran before the
+rule was in the app, with the same lines in `flow.wgsl`, put there by the variant `floor` of
+`variant.ts` at the commit `02c3772`;
+the names of their runs say `floor` for the mark of the app with 18 h, `floor6d` for the app, and
+`mark` for the variant with 18 h. The runs of 80,000 steps of the campaign give the lines of the
+runs `floor6d` of the mazes again, so these are not in the record a second time.
+
+**The campaign with the app.** The two mazes as in part 16, with the names
+`g54-<scene>-webgpu-s<seed>`; the seeds 1 to 3 run to step 80,000, and `UNTIL=30000` gives the
+lines of a run of 30,000 steps for all ten seeds:
+
+```bash
+for scene in snail-maze corn-maze; do UNTIL=30000 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene $(for seed in 1 2 3 4 5 6 7 8 9 10; do echo g54-$scene-webgpu-s$seed; done) > research/flow/out/engine/g54-$scene-webgpu.txt; done
+```
+
+Where children are born and where agents die, as in part 17, for both mazes (1 minute per run):
+
+```bash
+for scene in snail-maze corn-maze; do for seed in 1 2 3; do VITE_SCENE=$scene VITE_SEED=$seed VITE_AT=12000,20000,28000 VITE_NAME=g54-births-$scene-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/births.gpu.test.ts; done; node --import ./research/flow/register.mjs research/flow/engine/births.ts $scene g54-births-$scene-s1 g54-births-$scene-s2 g54-births-$scene-s3; done
+```
+
+You must see `born starved 0 open 0 fed 0` in the dead ends of the Snail maze in the windows from
+the steps 20,000 and 28,000. `births.ts` takes the time of the mark from the app; `RECOVER=0.00023`
+before `node` gives the `opens` of a run with the time of before.
+
+The trail on closed ground: the dumps of the last 10,000 of 30,000 steps, seeds 1 to 3 (50 s per
+run), measured with `GROUND=1`:
+
+```bash
+STEPS=$(seq -s, 20500 500 30000 | sed 's/,$//'); for scene in snail-maze corn-maze; do for seed in 1 2 3; do VITE_SCENE=$scene VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g54-ground-$scene-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; GROUND=1 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene g54-ground-$scene-s1 g54-ground-$scene-s2 g54-ground-$scene-s3 | grep ' run:'; done
+```
+
+`offClosed` is the share of the cells with a tube off the shortest route that lie on closed
+ground: you must see 0.98 to 1.00. But for `offClosed`, `detours` and the time, the lines of the
+dumps are the lines of the same steps in the record of the campaign.
+
+**Past the fade of the mark.** The two mazes to step 220,000 with a dump every 1,000 steps, seeds
+1 and 2 (5 minutes per run), and the Tokyo scene to step 224,000, seeds 1 to 3 (9 minutes per run):
+
+```bash
+STEPS=$(seq -s, 1000 1000 220000 | sed 's/,$//'); for scene in snail-maze corn-maze; do for seed in 1 2; do VITE_SCENE=$scene VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g54-$scene-fade-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done; WINDOW=10000 node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts $scene g54-$scene-fade-s1 g54-$scene-fade-s2 | grep window; done
+```
+
+```bash
+for seed in 1 2 3; do VITE_GROUND=1 VITE_SCENE=tokyo VITE_SEED=$seed VITE_STEPS=16000,24000,32000,40000,48000,64000,80000,96000,112000,128000,144000,160000,176000,192000,208000,224000 VITE_NAME=g54-tokyo-fade-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-tokyo.ts g54-tokyo-fade-s$seed 1.5 99999 >> research/flow/out/g54-tokyo-fade.txt; done
+```
+
+In the Snail maze you must see `blind` below 0.02 in the windows 30000 to 170000, and 0.06 to 0.10
+in the window 180000: the first ground is open again 160,182 steps after it closed. The windows of
+a record, for all its seeds, come from its lines:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-mazes research/flow/logs/engine/mark/snail-maze-fade.txt research/flow/logs/engine/mark/analysis-snail-maze-floor.txt
+```
+
+The Maze, seeds 1 to 10 to step 48,000 (1.5 minutes per run), as part 13 measures it:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_SCENE=maze VITE_I0=8 VITE_SEED=$seed VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000,20000,24000,32000,40000,48000 VITE_NAME=g54-mz-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g54-mz-webgpu-s$seed >> research/flow/out/g54-maze-webgpu.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/out/g54-maze-webgpu.txt
+```
+
+The Tokyo scenes, the scenes of part 9 and the regrowth of part 13 as in part 17, with the names
+`g54-…` and without `VITE_I0`: the scenes hold their flow strength. The digests as in part 17, after
+500 steps for every scene and after 3,000 steps for the eight scenes with the flow
+(`VITE_ONLY=maze,snail-maze,corn-maze,tokyo,tokyo-light,food-ring,rival-networks,tokyo-rivals`).
+After 500 steps 42 of the 54 runs must equal those of `main` at `02c3772`, and the two mazes with
+growth still equal them after 3,000 steps.
+
+**The wrong rules** FL1 to FL10, and D1 to D6 of the recovery (5 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts FL1 FL2 FL3 FL4 FL5 FL6 FL7 FL8 FL9 FL10 D1 D2 D3 D4 D5 D6
+```
+
+Result: with the mark of the app the blind branches of the Snail maze hold 0.4 % of the trail of
+the route (17.6 % before), no child is born in the dead ends, and the Maze and the Tokyo scenes
+keep their measures, the Tokyo scenes with a flow strength of 2.8. When the mark has faded, the
+colony comes back once. ADR 0054 has the tables. The records are in `logs/engine/mark/`:
+
+| Record                                               | Runs                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `analysis-<scene>-floor.txt`, `-mark.txt`            | the mazes to step 80,000 with 18 h: the mark of the app, and the variant        |
+| `analysis-births.txt`                                | the lines of `births.ts` for these two, the Snail maze, seeds 1 to 3            |
+| `analysis-tokyo-i1.4.txt`, `-i2.txt`, `-i2.8.txt`    | the Tokyo scene with the mark of the app and three flow strengths, seeds 1 to 3 |
+| `analysis-tokyo-mark.txt`, `analysis-starve-mark.*`  | the Tokyo scene and the regrowth with the variant `mark` and 18 h               |
+| `snail-maze-webgpu.txt`, `corn-maze-webgpu.txt`      | the lines of `measure-mazes.ts`, seeds 1 to 10, to step 30,000                  |
+| `<scene>-webgpu-long.txt`, `<scene>-webgl2.txt`      | seeds 1 to 3 to step 80,000 with their windows; WebGL2, seeds 1 and 2           |
+| `<scene>-fade.txt`                                   | seeds 1 and 2 to step 220,000 with their windows                                |
+| `births-<scene>.txt`, `ground-<scene>.txt`           | the lines of `births.ts`, and of `measure-mazes.ts` with `GROUND=1`             |
+| `maze-webgpu.txt`, `maze-webgl2.txt`                 | the Maze, seeds 1 to 10 to step 48,000, and seeds 1 to 3 on WebGL2              |
+| `tokyo-webgpu.txt`, `tokyo-strands.jsonl`            | the Tokyo scene, seeds 1 to 10: the measures and the closed ground              |
+| `tokyo-webgl2.txt`, `tokyo-light.txt`                | the Tokyo scene on WebGL2, and Tokyo with light, seeds 1 to 3                   |
+| `tokyo-fade.txt`, `tokyo-fade-strands.jsonl`         | the Tokyo scene to step 224,000, seeds 1 to 3                                   |
+| `starve.txt`, `starve-strands.jsonl`                 | the regrowth of part 13, seeds 1 to 3                                           |
+| `scenes-*.jsonl`                                     | the three scenes of part 9, seed 1                                              |
+| `digest-branch.jsonl`, `digest-main.jsonl`           | the digests of every scene after 500 steps, branch and `main`                   |
+| `digest-3000-branch.jsonl`, `digest-3000-main.jsonl` | the same after 3,000 steps for the eight scenes with the flow                   |
+| `mutations.txt`                                      | the wrong rules FL1 to FL10 and D1 to D6, and the tests that fail               |
+
+### 19. Does the slime field change a run, and what does it cost? [ADR 0055]
+
+Since ADR 0055 the extended model has a slime field: a stamp per cell, the step in which the cell
+last held plasm. No rule reads it yet. The setting Slime life time also gives the mark of starved
+ground its time: `recoverShare()` in `src/engine/flow.ts` scales `FLOW.recover` by 144 over the
+hours of the setting.
+
+**The tests of the rule** (Node 1 s, headless browser 20 s, and the built app):
+
+```bash
+npx vitest run --project unit src/engine/slime.test.ts src/engine/slime-reference.test.ts src/engine/render.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/slime.gpu.test.ts
+```
+
+```bash
+npm run build && npx playwright test --project=e2e tests/e2e/ui.spec.ts -g "Slime tool"
+```
+
+You saw 36, 96 and 1 tests pass with the layer of ADR 0055. Part 21 has the counts with the film
+of ADR 0057. `slime.gpu.test.ts` holds both backends to the CPU copy `slime-reference.ts`: the
+stamps step by step, the brush, and the picture.
+
+**The bytes of the scenes.** The digests as in part 17, with the names `g55-digest-branch` and
+`g55-digest-3000-branch`, after 500 steps for every scene and after 3,000 steps for the eight
+scenes with the flow (the list of part 18). The digests of `main` for it are those of the branch
+of ADR 0054:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g55-digest-branch.jsonl research/flow/logs/engine/mark/digest-branch.jsonl
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g55-digest-3000-branch.jsonl research/flow/logs/engine/mark/digest-3000-branch.jsonl
+```
+
+They must print that all 54 runs and all 16 runs are equal.
+
+**A life time of 18 hours gives the runs of ADR 0054 with 18 hours.** The Snail maze to step
+80,000, seeds 1 to 3, with the setting in place of `VITE_RECOVER` (2 minutes per run):
+
+```bash
+STEPS=$(seq -s, 500 500 80000 | sed 's/,$//'); for seed in 1 2 3; do VITE_PATCH='{"slimeLife":18}' VITE_SCENE=snail-maze VITE_SEED=$seed VITE_STEPS=$STEPS VITE_NAME=g55-snail-maze-life18-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-mazes.ts snail-maze g55-snail-maze-life18-s1 g55-snail-maze-life18-s2 g55-snail-maze-life18-s3 > research/flow/out/g55-life18-snail-maze.txt
+```
+
+Every line of that file must equal its line in `logs/engine/mark/analysis-snail-maze-floor.txt`,
+but for the name of the run at its start and the time of the run, `ms`, at its end.
+
+**The time of a step** with the pass of the stamps and without it. A life time of 0 runs no pass.
+The two cases run in turns (with, without, without, with), 2 minutes per run, and nothing else
+may use the GPU then:
+
+```bash
+run() { VITE_NAME=$1 VITE_SCENES=maze,tokyo,cyclones VITE_WARM=1000 VITE_PATCH="$2" npx vitest run --config research/vitest.config.ts research/flow/engine/bench.gpu.test.ts; }; run g55-bench-slime-r1 '{}' && run g55-bench-none-r1 '{"slimeLife":0}' && run g55-bench-none-r2 '{"slimeLife":0}' && run g55-bench-slime-r2 '{}'
+```
+
+**The time of a draw** with the layer of the slime and without it, on a canvas of 2,560 × 1,600
+pixels. `slime-draw.gpu.test.ts` draws one state 21 × 50 times with the switch off and on in
+turns. The first command draws the Snail maze and Three strains in the glow and gel styles at
+four views, the second Three strains in the glow style at six views from 0.15 to 4.8 cells per
+pixel. Since ADR 0057 the file times the film, with a third case (part 21); a checkout of
+`17d3ac6` times the layer:
+
+```bash
+VITE_NAME=g55-draw npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+```bash
+VITE_SCENES=three-strains VITE_STYLES=glow VITE_ZOOMS=0.25,1,2,3,4,8 VITE_NAME=g55-draw-zooms npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+**The wrong rules** SL1 to SL119: 31 of the stamps and of the time of the mark, 46 of the brush
+and 42 of the picture. Since ADR 0057 the numbers from SL78 on name wrong rules of the film
+(part 21), and the record of the 42 of the layer is `mutations-picture.txt`:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(for i in $(seq 1 77); do echo SL$i; done)
+```
+
+**The pictures** of the layer in each style, from the built app (`test-results/pictures/`).
+Since ADR 0057 the command makes the pictures of the film:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/slime.spec.ts
+```
+
+Result: no scene changes a byte, and a life time of 18 hours gives the runs of ADR 0054 line
+for line. The pass of the stamps costs 0.01 to 0.23 ms of a step on WebGPU. The layer costs about
+a tenth of a draw in a view that fits the grid, and up to 2.5 ms on WebGL2 in a view that is
+zoomed far out. Each of the 119 wrong rules fails at least one test. ADR 0055 has the tables. The
+records are in `logs/engine/slime/`:
+
+| Record                                         | Runs                                                                   |
+| ---------------------------------------------- | ---------------------------------------------------------------------- |
+| `digest-branch.jsonl`, `digest-3000-branch`    | the digests of every scene after 500 steps, and of eight after 3,000   |
+| `life18-snail-maze.txt`                        | the lines of `measure-mazes.ts` with a life time of 18 h, seeds 1 to 3 |
+| `bench-with-pass-r*.jsonl`, `bench-without-*`  | the time of a step with the pass of the stamps and without it          |
+| `draw.jsonl`, `draw-zooms.jsonl`               | the time of a draw with the layer and without it                       |
+| `draw-before.jsonl`, `draw-before-zooms.jsonl` | the same before the reads of the layer got cheaper (commit `f353ee8`)  |
+| `mutations.txt`, `-brush.txt`, `-picture.txt`  | the wrong rules SL1 to SL31, SL32 to SL77 and SL78 to SL119            |
+
+### 20. Does a colony choose the arm without slime in a Y-maze? [ADR 0056]
+
+The Y-maze of Reid et al. 2012 as research code: `engine/y-maze.ts` is the layout, with a unit
+test of its mirror image, and `engine/y-maze.gpu.test.ts` runs it in the real engine, on WebGPU.
+A run paints the slime, waits 18,000 steps, places about 50 agents on the base and reads after
+every step which food holds plasm first. 40 seeds take 3 minutes. The rules are variants of
+`engine/variant.ts` with names that start with `slime-`. A variant changes files below `src/`
+while its command runs and puts them back: no growth pass of the app binds the slime field.
+
+```bash
+npx vitest run --project unit research/flow/engine/y-maze.test.ts
+```
+
+```bash
+run() { npx vitest run --config research/vitest.config.ts research/flow/engine/y-maze.gpu.test.ts; }; rule() { node --import ./research/flow/register.mjs research/flow/engine/variant.ts "$1" npx vitest run --config research/vitest.config.ts research/flow/engine/y-maze.gpu.test.ts; }
+```
+
+The app with slime on one arm, on both arms and on no arm, and with arms of 9 cells. The side of
+the slime changes with the seed:
+
+```bash
+for c in one both none; do VITE_CASE=$c VITE_SEEDS=1-40 run; done; VITE_CASE=one VITE_WIDTH=9 VITE_SEEDS=1-40 run
+```
+
+The rules of the births and of the moves with slime on one arm, and the rule of the moves with
+slime on both arms and with arms of 9 cells:
+
+```bash
+for r in slime-weight slime-old-300 slime-wall-300 slime-stay-300 slime-stay-300-0.25; do VITE_CASE=one VITE_SEEDS=1-40 rule $r; done; for r in slime-stay-300 slime-stay-300-0.25; do VITE_CASE=both VITE_SEEDS=1-40 rule $r; done; VITE_CASE=one VITE_WIDTH=9 VITE_SEEDS=1-40 rule slime-stay-300
+```
+
+The runs with 10 seeds are the same commands with `VITE_SEEDS=1-10`: `slime-ban-300`,
+`slime-sense-300-10`, `slime-sense-300-100`, `slime-old-3000` and `slime-wall-3000` with slime on
+one arm; the rules of the births with `VITE_CASE=both` and `VITE_CASE=none`; `VITE_FRESH=1` for
+slime of the age 0; and `slime-bind`, which reads the field and must give the runs of the app.
+The age of the slime of the free neighbours of a parent, with no painted slime and with slime on
+one arm:
+
+```bash
+for c in none one; do VITE_CASE=$c VITE_SEEDS=1-10 VITE_BIRTHS=1 VITE_NAME=births-$c rule births; done
+```
+
+The tables, one line per record, and the ages:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-y-maze.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-y-maze.ts births births-none births-one
+```
+
+The script reads `out/engine/y-maze/`. To make the tables from the archive, copy the files
+`*.jsonl` of `logs/engine/y-maze/` there.
+
+Result: the app has no preference (19 : 20 for the blank arm and the arm with slime). The rules of
+the births reach 26 : 11 to 28 : 12. The rule of the moves reaches 40 : 0, and 39 : 1 with arms of
+9 cells, and no preference with slime on both arms, where its colony needs 233 steps to the first
+food in place of 65. ADR 0056 has the tables and the decision. The records are in
+`logs/engine/y-maze/`:
+
+| Record                          | Runs                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `none-<case>-s<seeds>.jsonl`    | the app: one line per run; `-w9` arms of 9 cells, `-fresh` slime of age 0 |
+| `slime-<rule>-<case>-s<seeds>`  | the same with a rule; a `+` joins two rules                               |
+| `births-none-*`, `births-one-*` | the runs that wrote their births; the dumps of the births are not kept    |
+| `nogrowth-*`                    | a colony without growth, with no rule and with the rule of the sensors    |
+| `tables.txt`, `births.txt`      | the lines of `measure-y-maze.ts` for all records, and the ages            |
+
+### 21. Does the film show where a tube stayed, and what does it cost? [ADR 0057]
+
+Since ADR 0057 the slime field also holds an amount of slime per cell, a whole number from 0 to
+4,095, and the picture draws the slime as a wet film whose thickness is that amount. No rule
+reads the amount. The flat layer of part 19 is gone, and so are its wrong rules SL78 to SL119:
+these numbers now name wrong rules of the film.
+
+**The tests of the rule** (Node 1 s, headless browser 30 s, and the built app):
+
+```bash
+npx vitest run --project unit src/engine/slime.test.ts src/engine/slime-reference.test.ts src/engine/render.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/slime.gpu.test.ts
+```
+
+```bash
+npm run build && npx playwright test --project=e2e tests/e2e/ui.spec.ts -g "Slime tool"
+```
+
+You must see 86, 126 and 1 tests pass. `slime.gpu.test.ts` holds both backends to the CPU
+copy `slime-reference.ts`: the amount step by step and under the brush, the map of the film and
+its coarse map, and the picture of the film in each style.
+
+**Which amount keeps the shape of a tube?** The Snail maze with the seed 1 to step 22,000, with
+candidate amounts kept on the CPU (1 minute). It writes each candidate as a grey picture, and
+the table of the ADR to `test-results/pictures/amount-snail-maze-22000.txt`:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/slime-amount.spec.ts
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the names `g57-digest-branch` and
+`g57-digest-3000-branch`. The digests of `main` for it are those of part 19:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g57-digest-branch.jsonl research/flow/logs/engine/slime/digest-branch.jsonl
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g57-digest-3000-branch.jsonl research/flow/logs/engine/slime/digest-3000-branch.jsonl
+```
+
+They must print that all 54 runs and all 16 runs are equal.
+
+**The time of a step** with the amount, against `main` and against a life time of 0, which runs
+no pass. `../main` is a checkout of `main` at `a6ffe64` with `node_modules`. The three cases run
+in turns, in another order in each of three rounds, 2 minutes per run, and nothing else may use
+the GPU then:
+
+```bash
+run() { (cd $1 && VITE_NAME=$2 VITE_SCENES=maze,tokyo,cyclones VITE_WARM=1000 VITE_PATCH="$3" npx vitest run --config research/vitest.config.ts research/flow/engine/bench.gpu.test.ts); }; film() { run . g57-bench-film-r$1 '{}'; }; main() { run ../main g57-bench-main-r$1 '{}'; }; none() { run . g57-bench-none-r$1 '{"slimeLife":0}'; }; film 1; main 1; none 1; none 2; main 2; film 2; main 3; film 3; none 3
+```
+
+**The time of a draw** on a canvas of 2,560 × 1,600 pixels. `slime-draw.gpu.test.ts` draws one
+state 21 × 50 times in each of three cases in turns: `off`, with the switch Show slime off;
+`on`, with the film and its maps filled; and `fill`, where every draw fills the maps again, as
+the first frame after a step does. The first command draws the Snail maze and Three strains in
+the glow and gel styles at four views, the second Three strains in the glow style at six views
+from 0.15 to 4.8 cells per pixel, and the third the paper and agents styles. The same two first
+commands in `../main`, with the names `g57-draw-main` and `g57-draw-zooms-main`, time the layer
+of ADR 0055:
+
+```bash
+VITE_NAME=g57-draw npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+```bash
+VITE_SCENES=three-strains VITE_STYLES=glow VITE_ZOOMS=0.25,1,2,3,4,8 VITE_NAME=g57-draw-zooms npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+```bash
+VITE_SCENES=three-strains VITE_STYLES=paper,agents VITE_ZOOMS=1,4 VITE_NAME=g57-draw-styles npx vitest run --config research/vitest.config.ts research/flow/engine/slime-draw.gpu.test.ts
+```
+
+**The wrong rules** SL1 to SL222: 31 of the stamps and of the time of the mark, 46 of the brush,
+102 of the picture (SL78 to SL179) and 43 of the amount (SL180 to SL222):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(for i in $(seq 1 222); do echo SL$i; done)
+```
+
+**The pictures** of the film in each style, from the built app (`test-results/pictures/`):
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/slime.spec.ts
+```
+
+Result: no scene changes a byte. With the rule of the app 16.4 % of the cells with slime are
+above 0.9 after 22,000 steps of the Snail maze; with a sum that is full after 500 steps 96.5 %
+are. The amount costs 0.01 to 0.37 ms of a step on WebGPU. Where the film covers a picture of
+2,560 × 1,600 pixels it costs 2 ms of a draw on WebGPU and 4 ms on WebGL2, and the first frame
+after a step 0.6 to 1.1 ms more for the maps of 1.5 million cells. Each of the 222 wrong rules
+fails at least one test. ADR 0057 has the tables. The records are in `logs/engine/film/`:
+
+| Record                                           | Runs                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| `digest-branch.jsonl`, `digest-3000-branch`      | the digests of every scene after 500 steps, and of eight after 3,000  |
+| `amount-snail-maze-22000.txt`                    | the table of the candidate amounts                                    |
+| `bench-film-r*`, `bench-main-r*`, `bench-none-*` | the time of a step with the amount, on `main`, and without the pass   |
+| `draw.jsonl`, `draw-zooms`, `draw-styles`        | the time of a draw without the film, with it, and with a fill         |
+| `draw-main.jsonl`, `draw-zooms-main.jsonl`       | the time of a draw with the layer of ADR 0055 and without it, on main |
+| `mutations-stamps-brush.txt`, `-picture-*.txt`   | the wrong rules SL1 to SL77 and SL78 to SL179                         |
+| `mutations-amount.txt`                           | the wrong rules SL180 to SL222                                        |
+
+### 22. Does the picture show the growth front, and does a run change? [ADR 0060]
+
+The slime field holds a front stamp per cell, and the picture draws a skirt around young ground.
+This part has no measurement of the model: no rule reads the front stamp.
+
+**The pictures** of the growth front in each style, from the built app (`test-results/pictures/`,
+1 minute). `FRONT=tokyo,maze` makes those cases only, and `STYLES=gel` that style only. The cases
+are Tokyo at the steps 600, 1,500 and 4,000, the Foraging maze, Three strains, Rival networks, the
+edge of the gel 10 times closer, and Tokyo on WebGL2:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/front.spec.ts
+```
+
+**The tests** of the front stamp on both backends against the CPU reference, and of the skirt in
+the picture (20 seconds); then the tests of the film, which hold the frames without the skirt:
+
+```bash
+npx vitest run --project gpu src/engine/front.gpu.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/slime.gpu.test.ts
+```
+
+**In the image of CI.** The first run of CI failed in `front.gpu.test.ts`: SwiftShader, the GPU
+of CI, drew a black tube where the M3 Pro drew a normal picture (ADR 0060, Results). To run the
+file as CI does, copy the commit into an empty folder with `git archive HEAD | tar -x -C <folder>`
+and run it there in the image that `.github/workflows/ci.yml` pins (1 minute after `npm ci`):
+
+```bash
+docker run --rm -v <folder>:/work -w /work -e CI=1 <image> bash -lc "npm ci && npx vitest run --project gpu src/engine/front.gpu.test.ts"
+```
+
+**The time of the e2e tests** of the second shard in the image of CI, here and in a checkout of
+`main`, one after the other with nothing else on the machine (12 minutes each, after `npm ci`):
+
+```bash
+docker run --rm --ipc=host -v <folder>:/work -w /work -e CI=1 <image> bash -lc "npm run build && npx playwright test --project=e2e --reporter=list --shard=2/2"
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the names `g59-digest-branch` and
+`g59-digest-3000-branch`. The digests of `main` for it are those of part 21:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g59-digest-branch.jsonl research/flow/logs/engine/film/digest-branch.jsonl
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g59-digest-3000-branch.jsonl research/flow/logs/engine/film/digest-3000-branch.jsonl
+```
+
+They must print that all 54 runs and all 16 runs are equal.
+
+**The wrong rules** of the front stamp, of the skirt, of the film below the plasm, of the copies of
+a lattice and of the scent view over the film (GF1 to GF26), and the 16 wrong rules of the slime whose
+lines changed (part 7 has the tool):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SL17 SL20 SL60 SL92 SL94 SL132 SL134 SL159 SL162 SL170 SL176 SL177 SL178 SL219 SL220 SL222 GF1 GF2 GF3 GF4 GF5 GF6 GF7 GF8 GF9 GF10 GF11 GF12 GF13 GF14 GF15 GF16 GF17 GF18 GF19 GF20 GF21 GF22 GF23 GF24 GF25 GF26
+```
+
+**The time of a step** with the front stamp, against `main`: the command of part 21 with the
+names `g59-bench-front-r1` and `-r2` here and `g59-bench-main-r1` and `-r2` in a checkout of
+`main` at `07b295e`, two rounds in turns, 2.7 minutes per run, with nothing else on the GPU.
+
+Result: no scene changes a byte. Each of the 42 wrong rules fails at least one test (GF11 to GF26
+ran with the skirt of decision 14 of the ADR, the other 26 before it). Two rounds do
+not resolve the cost of the front stamp in a step: the means of the medians differ by −0.2 to
++0.02 ms on WebGPU and by −0.1 to +0.4 ms on WebGL2, and two rounds of one case differ by as
+much. The second shard of the e2e tests takes 12.4 min here and 11.1 min on `main` in the image of
+CI. Not measured: the time of a draw with the skirt. ADR 0060 has the rest. The records are in
+`logs/engine/front/`:
+
+| Record                                      | Runs                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------- |
+| `digest-branch.jsonl`, `digest-3000-branch` | the digests of every scene after 500 steps, and of eight after 3,000 |
+| `mutations.txt`                             | the 42 wrong rules of the command above                              |
+| `e2e-half2-main.txt`, `e2e-half2-branch`    | the second shard of the e2e tests in the image of CI, `main`, here   |
+| `bench-front-r*`, `bench-main-r*`           | the time of a step with the front stamp, and on `main`               |
+
+### 23. Does the black level cut the plasm? [ADR 0062]
+
+The owner saw tubes tear as soon as they covered a certain share of the work surface. The black
+level of the picture was the 65th percentile of the trail over all cells. Above a cover of 35 %
+it rose into the plasm. Now, with one agent per cell, it is at most half of the median trail of
+the cells that hold an agent. This part has no measurement of the model: no rule reads the levels.
+
+**The pictures and the numbers**: eleven cases, each with the black level of before and with the
+one of the app, from the built app (`test-results/pictures/`, 1 minute). `LEVELS=sheet,spots`
+makes those cases only, and `BACKEND=webgl2` runs the app on WebGL2. A line per case says how
+many of the cells with an agent each black level draws black:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/levels.spec.ts
+```
+
+**The tests** of the rule on the CPU, and of a sheet, a network, agents without trail and a scene
+without the rule on both backends (15 seconds):
+
+```bash
+npx vitest run --project unit src/engine/exposure.test.ts
+```
+
+```bash
+npx vitest run --project gpu src/engine/levels.gpu.test.ts
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g62-digest-branch`. The
+digests of `main` for it are those of part 22:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g62-digest-branch.jsonl research/flow/logs/engine/front/digest-branch.jsonl
+```
+
+It must print that all 54 runs are equal.
+
+**The wrong rules** of the black level (BL1 to BL11), and the six wrong rules of the picture of
+the tubes whose lines changed (part 7 has the tool):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts BL1 BL2 BL3 BL4 BL5 BL6 BL7 BL8 BL9 BL10 BL11 V51 V52 V53 V54 V57 V58
+```
+
+Result: in the owner's case the black level of before drew 19 % of the cells with an agent black,
+and the one of the app 0.6 %. A sheet of agents went from 48 % to 1.2 %. Six cases keep their
+level: there the 65th percentile lies below the limit. Each of the 17 wrong rules fails at least
+one test. Not measured: the time of a measurement of the levels. ADR 0062 has the table. The
+records are in `logs/view/levels/`:
+
+| Record                     | Runs                                          |
+| -------------------------- | --------------------------------------------- |
+| `webgpu.txt`, `webgl2.txt` | the lines of the eleven cases on each backend |
+| `mutations.txt`            | the 17 wrong rules of the command above       |
+
+### 24. Does a scene move after a switch to one agent per cell? [ADR 0063]
+
+With the rule, Agents per cell is the share of the cells that hold an agent. A switch to the rule
+from 1 agent per cell or more gave 1: an agent in every cell, and no agent could move. Now the
+switch gives such a scene Jones' 0.15, and a switch back puts the value of before back. This part
+has no measurement of the engine: the rule is in the settings and in the panel.
+
+**The tests** of the rule in the settings and of the switch in the panel (2 seconds):
+
+```bash
+npx vitest run --project unit src/model/params.test.ts src/ui/state.test.ts
+```
+
+**The wrong rules** of the density at the switch (DR1 to DR11; part 7 has the tool):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts DR1 DR2 DR3 DR4 DR5 DR6 DR7 DR8 DR9 DR10 DR11
+```
+
+Result: each of the 11 wrong rules fails at least one test. ADR 0063 has the numbers of the
+owner's two links. The record is `logs/panel/density-mutations.txt`.
+
+### 25. Do the start scenes and the experiments show tubes with the rules of the organism? [ADR 0064]
+
+The owner wanted smooth, calm tubes in every scene of Start here and of Experiments, as in the Corn
+maze. Those scenes now run one rule set: one agent per cell, growth, the flow and the slime, with
+Jones' agent. Two new start scenes grow three and two rival colonies from food. Fleeing light
+and the Foraging maze got the rules that they lacked. The Maze keeps its settings: it follows
+the protocol of the maze of 2000, and growth makes it worse.
+
+**The numbers and the pictures** of the two start scenes and of Fleeing light, from the built app
+(`test-results/pictures/`, 1.5 minutes): the agents of every strain, the foods that every strain
+covers and the share of the cells with trail, every 250 to 500 steps, and pictures of four steps.
+`SCENES=light` makes one scene only, `LONG=1` adds the steps 20,000 and 40,000:
+
+```bash
+npm run build && npx playwright test --project=pictures tests/pictures/scenes.spec.ts
+```
+
+**The Foraging maze with the flow**, 10 seeds on WebGPU (6 minutes), then the table of the seeds:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_KIND=webgpu VITE_SCENE=foraging-maze VITE_SEED=$seed VITE_STEPS=1000,2000,3000,4000,5000,6000,8000,10000,15000,20000 VITE_NAME=g64-fm-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g64-fm-webgpu-s$seed >> research/flow/out/g64-foraging-maze-webgpu.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/out/g64-foraging-maze-webgpu.txt
+```
+
+**The Maze with growth**, the option that ADR 0064 rejects: the Maze with growth, a Capacity of
+0.25 and no random shrinkage, 10 seeds on WebGPU (5 minutes); with `VITE_KIND=webgl2` and the
+seeds 1 to 3 the same on WebGL2. The table of the Maze as it is comes from the record of part 11:
+
+```bash
+for seed in 1 2 3 4 5 6 7 8 9 10; do VITE_KIND=webgpu VITE_SCENE=maze VITE_SEED=$seed VITE_PATCH='{"growth":true,"capacity":0.25,"shrink":0}' VITE_STEPS=500,1000,1500,2000,2500,3000,4000,5000,7500,10000,15000 VITE_NAME=g64-mz-webgpu-s$seed npx vitest run --config research/vitest.config.ts research/flow/engine/dump.gpu.test.ts && node --import ./research/flow/register.mjs research/flow/engine/measure-maze.ts g64-mz-webgpu-s$seed >> research/flow/out/g64-maze-webgpu.txt; done
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts engine-maze research/flow/out/g64-maze-webgpu.txt research/flow/logs/engine/maze-webgpu-flux8-sites.txt
+```
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g64-digest-branch`. The
+digests of `main` for it are those of part 22:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g64-digest-branch.jsonl research/flow/logs/engine/front/digest-branch.jsonl
+```
+
+It must print that 50 of 54 runs are equal, and name Fleeing light and the Foraging maze on both
+backends: the two scenes that this record changes. The file holds 58 runs: 4 are the two new
+scenes.
+
+Result: every strain of Three strains covers all 12 foods at step 1,003, and three networks stay
+to step 40,000 in pictures. The Foraging maze joins its two foods by step 5,000 in 10 of 10
+seeds, and its tube is 1.03 times as long as the shortest route from step 15,000. With growth the
+dead ends of the Maze fall below a tenth of the route's trail at step 12,500 (7,500 to 15,000),
+against step 1,500 (1,500 to 2,000) without it, and its tube is 1.17 times the shortest route at
+step 15,000, against 1.10. Not measured: the two start scenes and Fleeing light with more than
+one seed in numbers, and any of the new scenes on WebGL2 in numbers. ADR 0064 has the tables.
+The records are in `logs/engine/scenes-0064/`:
+
+| Record                     | Runs                                                           |
+| -------------------------- | -------------------------------------------------------------- |
+| `numbers-webgpu.txt`       | the lines of `scenes.spec.ts` for the three scenes, seed 1     |
+| `foraging-maze-webgpu.txt` | the lines of `measure-maze.ts` for the Foraging maze, 10 seeds |
+| `maze-growth-webgpu.txt`   | the same for the Maze with growth, 10 seeds                    |
+| `maze-growth-webgl2.txt`   | the same on WebGL2, 3 seeds                                    |
+| `digest-branch.jsonl`      | the digests of every scene after 500 steps on both backends    |
+
+### 26. Do the scenes of Reid et al. 2012 show what the app does with slime? [ADR 0066]
+
+The owner asked for a Y-maze with slime on one arm and a dish with slime everywhere: the test beds of
+stage 4 (ADR 0065). Both scenes start their colony on a start spot without food, as the plasmodium of
+the paper starts. No rule reads the slime, so the runs must not change when the slime goes.
+
+**The runs**, both scenes with 5 seeds on WebGPU and 6,000 steps (30 s), and with 2 seeds on WebGL2
+and 3,000 steps (40 s); each with the slime and without it (`VITE_SLIME=0`), with pictures:
+
+```bash
+VITE_KINDS=webgpu VITE_SEEDS=1-5 VITE_STEPS=6000 VITE_SNAPS=200,1000,3000,6000 VITE_NAME=g66-webgpu npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+VITE_KINDS=webgpu VITE_SEEDS=1-5 VITE_STEPS=6000 VITE_SLIME=0 VITE_NAME=g66-webgpu-blank npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+VITE_KINDS=webgl2 VITE_SEEDS=1-2 VITE_STEPS=3000 VITE_SNAPS=1000,3000 VITE_NAME=g66-webgl2 npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+VITE_KINDS=webgl2 VITE_SEEDS=1-2 VITE_STEPS=3000 VITE_SLIME=0 VITE_NAME=g66-webgl2-blank npx vitest run --config research/vitest.config.ts research/flow/engine/reid.gpu.test.ts
+```
+
+The table of each run: the step at which each food holds plasm, and the agents and the cells with
+plasm at some steps, in the Y-maze also on the base and on each arm. With a second record it says
+whether each run ends with the bytes of the run of the same seed there:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/measure-reid.ts g66-webgpu g66-webgpu-blank
+node --import ./research/flow/register.mjs research/flow/engine/measure-reid.ts g66-webgl2 g66-webgl2-blank
+```
+
+They must print that 10 of 10 and 4 of 4 runs have the bytes of the runs without the slime. A
+picture is the PNG of the canvas as base64 in `out/engine/`:
+`base64 --decode < <file>.png.b64 > <file>.png` makes the image.
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g66-digest-branch`. The
+digests of `main` for it are those of part 25:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g66-digest-branch.jsonl research/flow/logs/engine/scenes-0064/digest-branch.jsonl
+```
+
+It must print that 58 of 58 runs are equal. The file holds 62 runs: 4 are the two new scenes.
+
+**The wrong rules** of the start spot and of the film of the Y-maze (5 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts SP1 SP2 SP3 SP4 SP5 SP6 SP7 SP8 SP9 SP10 SP11 SP12 SP13 SP14 SP15
+```
+
+Each must fail at least one test.
+
+Result: in the Y-maze the colony reaches the first food after 64 to 140 steps, the food of the arm
+with slime first in 2 of 7 runs, and one tube joins the two foods from about step 3,000. In the dish
+it reaches the glucose after 115 to 511 steps, and a network of loops remains. Every run with the
+slime has the bytes of the run without it. Not measured: more seeds, and slime on both arms or on
+none. ADR 0066 has the tables. The records are in `logs/engine/reid-0066/`:
+
+| Record                      | Runs                                                          |
+| --------------------------- | ------------------------------------------------------------- |
+| `scenes-webgpu.jsonl`       | the lines of `reid.gpu.test.ts` for both scenes, seeds 1 to 5 |
+| `scenes-webgpu-blank.jsonl` | the same without the slime                                    |
+| `scenes-webgl2.jsonl`       | the same on WebGL2, seeds 1 and 2, with the slime             |
+| `scenes-webgl2-blank.jsonl` | the same without the slime                                    |
+| `digest-branch.jsonl`       | the digests of every scene after 500 steps on both backends   |
+| `mutations.txt`             | the tests that fail for each of the wrong rules SP1 to SP15   |
+
+### 27. Does the territory of each strain keep the bytes of every scene? [ADR 0068]
+
+The territory of each strain is the first of the four parts of the engine of stage 4
+(`research/front/ENGINE.md`). Its rules run only while the setting `territory` is on, and no scene
+turns it on yet, so every scene must keep its bytes.
+
+**The bytes of the scenes.** The digests as in part 17, with the name `g68-digest-branch` (75 s).
+The digests of `main` for it are those of part 26:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g68-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g68-digest-branch.jsonl research/flow/logs/engine/reid-0066/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the territory, with S1 and L3, whose texts follow the code of the territory
+now (5 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts TY1 TY2 TY3 TY4 TY5 TY6 TY7 TY8 TY9 TY10 TY11 TY12 TY13 TY14 TY15 TY16 TY17 TY18 TY19 TY20 TY21 TY22 TY23 TY24 TY25 TY26 TY27 TY28 TY29 TY30 TY31 TY32 TY33 TY34 TY35 TY36 TY37 TY38 S1 L3
+```
+
+Each must fail at least one test.
+
+Result: 62 of 62 runs are equal, and each of the 40 wrong rules fails at least one test. The
+records are in `logs/engine/territory-0068/`:
+
+| Record                | Runs                                                                   |
+| --------------------- | ---------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends            |
+| `mutations.txt`       | the tests that fail for each of the wrong rules TY1 to TY38, S1 and L3 |
+
+### 28. Do the sinks of each strain keep the bytes of every scene? [ADR 0069]
+
+The sinks of each strain and the rule of a corner in the push are part E2a of the engine of stage 4
+(`research/front/ENGINE.md`). They run only while the setting `territory` is on, which no scene turns
+on, so every scene must keep its bytes.
+
+**The bytes of the scenes.** The digests as in part 27, with the name `g69-digest-branch`. The
+digests of `main` for it are those of part 27, whose code `main` holds:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g69-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g69-digest-branch.jsonl research/flow/logs/engine/territory-0068/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the sinks and of the corner, with TY31, whose text follows the code of
+`packTerritory()` now:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts TY31 $(seq -f 'TY%g' 39 101)
+```
+
+Each must fail at least one test.
+
+Result: 62 of 62 runs are equal, and each of the 64 wrong rules fails at least one test. The
+records are in `logs/engine/sinks-0069/`:
+
+| Record                | Runs                                                                   |
+| --------------------- | ---------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends            |
+| `mutations.txt`       | the tests that fail for each of the wrong rules TY39 to TY101 and TY31 |
+
+### 29. Does the flow that takes the sinks keep the bytes of every scene? [ADR 0070]
+
+The flow with the sinks and the sources, the adaptation while the front took flux, and the drift in
+the sensors are part E2b of the engine of stage 4 (`research/front/ENGINE.md`). They run only while
+the setting `territory` is on, which no scene turns on, so every scene must keep its bytes. The
+parameters of every pass gain the slot of the drift, and the uniform block of the flow a slot of
+what the sinks take: no pass of the code before reads them.
+
+**The bytes of the scenes.** The digests as in part 28, with the name `g70-digest-branch`. The
+digests of the code before are those of part 28, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g70-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g70-digest-branch.jsonl research/flow/logs/engine/sinks-0069/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the flow with the sinks and of the drift, with TY36 and TY37, whose texts
+follow the code of the link and of the Jones model now (3 minutes on an M3 Pro):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts TY36 TY37 $(seq -f 'TY%g' 102 140)
+```
+
+Each must fail at least one test.
+
+Result: 62 of 62 runs are equal, and each of the 41 wrong rules fails at least one test. The
+records are in `logs/engine/flow-sinks-0070/`:
+
+| Record                | Runs                                                                          |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                   |
+| `mutations.txt`       | the tests that fail for each of the wrong rules TY36, TY37 and TY102 to TY140 |
+
+### 30. Do the births that the flux pays keep the bytes of every scene? [ADR 0071]
+
+The budget of each strain, the keys in `test`, the pass `rank` and the paid parents of `win` are part E3 of the engine
+of stage 4 (`research/front/ENGINE.md`). They run only while the setting `territory` is on, which no scene turns on,
+so every scene must keep its bytes. The uniform block of the flow gains the growth of the budget in a lane that no
+pass of the code before reads.
+
+**The bytes of the scenes.** The digests as in part 29, with the name `g71-digest-branch`. The digests of the code
+before are those of part 29, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g71-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g71-digest-branch.jsonl research/flow/logs/engine/flow-sinks-0070/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the paid births, with LG3, LG8, TY15, TY26, TY31 and TY94, whose texts follow the code of
+growth and of the step now:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts LG3 LG8 TY15 TY26 TY31 TY94 $(seq -f 'TY%g' 141 213)
+```
+
+Each must fail at least one test.
+
+**The time of `rank`** (ADR 0071, on a quiet machine; `bench.gpu.test.ts` with `VITE_SCENES=three-networks
+VITE_FLOWS=on VITE_WARM=1500 VITE_BATCH=30 VITE_BATCHES=11` and `VITE_PATCH` `{"territory":true,"capacity":1}` and
+`{"territory":false,"capacity":1}` for the steps):
+
+```bash
+VITE_NAME=rank npx vitest run --config research/vitest.config.ts research/front/rank.gpu.test.ts
+```
+
+Result: 62 of 62 runs are equal, and each of the 79 wrong rules fails at least one test. The records are in
+`logs/engine/paid-0071/`:
+
+| Record                | Runs                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                         |
+| `mutations.txt`       | the tests that fail for each of TY141 to TY213, LG3, LG8, TY15, TY26, TY31 and TY94 |
+| `rank.jsonl`          | the time of `rank` in the start scene on both backends, capacities 1 and 0.25       |
+| `rank-block1.jsonl`   | the same on WebGPU with one key per round of the loop (`RANK_BLOCK` 1)              |
+| `steps.jsonl`         | the time of a step of the start scene at capacity 1, with and without the rules     |
+
+### 31. Does the tube of a sink keep the bytes of every scene? [ADR 0072]
+
+Part E2c of the engine of stage 4 (`research/front/ENGINE.md`): the gap between the backends in the start scene with
+the rules, and the spikes of the pressure. The story is `research/front/E2c-NOTES.md`; its scripts are
+`research/front/e2c-*` and `research/front/start.sh`. The fix, the test of the tube of a sink, runs only while the
+setting `territory` is on, which no scene turns on, so every scene must keep its bytes.
+
+**The gap and the spikes.** The start scene on both backends, 18 seeds to step 1,503, and the first 30 steps of the
+flux of seeds 1 to 6 (about 5 minutes on an M3 Pro):
+
+```bash
+VITE_RULES=true VITE_SEEDS=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18 VITE_OUT=e2c-backends-after npx vitest run --config research/vitest.config.ts research/front/e2c-backends.gpu.test.ts
+VITE_OUT=e2c-islands-after npx vitest run --config research/vitest.config.ts research/front/e2c-islands.gpu.test.ts
+```
+
+**The prototype.** The Y-maze and the dish with both starts, with and without the test of the tube (52 jobs on 11
+cores, 17 minutes), and the patches of the first 60 steps of 40 seeds of its dish:
+
+```bash
+bash research/front/start.sh e2c-start
+node --import ./research/flow/register.mjs research/front/e2c-proto.ts layout=dish seeds=1-40 steps=60 marks=60 scent=0 sinkTube=1
+```
+
+**The bytes of the scenes.** The digests as in part 30, with the name `g72-digest-branch`, against the record of part
+30, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g72-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g72-digest-branch.jsonl research/flow/logs/engine/paid-0071/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the tube of a sink:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f 'TY%g' 214 230)
+```
+
+Each must fail at least one test.
+
+Result: the 4 spikes go (the least pressure of the first 30 steps is −315 to −3,801 in all 36 runs of a strain), over
+the 18 seeds the medians are 1,486 agents on WebGPU and 1,531 on WebGL2 (WebGPU higher in 158 of 324 pairs), 62 of 62
+runs are equal, and each of the 17 wrong rules fails at least one test. The records are in `logs/engine/tube-0072/`:
+
+| Record                 | Runs                                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `digest-branch.jsonl`  | the digests of every scene after 500 steps on both backends                              |
+| `mutations.txt`        | the tests that fail for each of the wrong rules TY214 to TY230                           |
+| `backends-*.txt`       | the start scene on both backends: seeds 1 to 6 and 7 to 18 before the fix, 1 to 18 after |
+| `dish160-*.txt`        | one strain in the dish of the prototype on both backends, before and after the fix       |
+| `islands-*.txt`        | the patches of tube that hold sinks, the first 30 steps, before and after the fix        |
+| `pressure-cpu-*.txt`   | the update and the pressure of each strain against the CPU copy, step by step            |
+| `levels-*.txt`         | the level of each network against its ground, drift 1.5 and 0, and the dish              |
+| `aggregate-*.txt`      | sums of each strain at drift 0, seeds 1 to 30, for a quantity that differs by backend    |
+| `start.txt`, `map.txt` | the start of each strain, and a map of the cells around three spikes                     |
+| `proto/`               | the prototype: a shift of a level, both starts, 40 seeds, the Y-maze, `start.sh`         |
+
+### 32. Does the drift `take` keep the bytes of every scene, and do both backends grow alike? [ADR 0075]
+
+Part E2e of the engine of stage 4 (`research/front/ENGINE.md`): the drift `take` that the owner chose (ADR 0074), in
+both backends. The notes are `research/front/E2e-NOTES.md`. It runs only while the setting `territory` is on, which
+no scene turns on, so every scene must keep its bytes.
+
+**The bytes of the scenes.** The digests as in part 31, with the name `g75-digest-branch`, against the record of part
+31, whose code this branch starts from:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g75-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g75-digest-branch.jsonl research/flow/logs/engine/tube-0072/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The start scene with the rules** on both backends, seeds 1 to 12 to step 1,503, with the least pressure of each
+strain in the first 30 steps (about 3 minutes on an M3 Pro), and its summary:
+
+```bash
+VITE_OUT=e2e-backends npx vitest run --config research/vitest.config.ts research/front/e2e-backends.gpu.test.ts
+node --import ./research/flow/register.mjs research/front/e2e-summary.ts research/front/out/e2e-backends.txt
+```
+
+**The wrong rules** of the drift `take`, with the 19 rules whose texts follow the new code:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts S2 L1 TY96 TY104 TY105 TY108 TY110 TY113 TY114 TY117 TY119 TY120 TY121 TY122 TY123 TY124 TY125 TY133 TY139 $(seq -f 'TY%g' 231 270)
+```
+
+Each must fail at least one test.
+
+**The time of a step** of the start scene at capacity 1 with the rules, this branch and `main` in turns
+(`research/front/E2e-NOTES.md`, part 6, has the commands and a trap of the copy of `main`).
+
+Result: 62 of 62 runs are equal. Every strain of the 24 runs of the start scene ends with 224 to 430 agents; the
+medians per strain are 291, 296 and 328 on WebGPU and 307.5, 316.5 and 299.5 on WebGL2 (Mann-Whitney p 0.64, 0.27 and
+0.89; the sum p 0.60). The least pressure of the first 30 steps is −258 to −3,801. Each of the 59 wrong rules fails at
+least one test. A step takes about 2 to 3 % more than on `main` (WebGPU 3.74 and 3.72 ms against 3.67 and 3.63 ms,
+WebGL2 8.06 and 7.96 ms against 7.84 and 7.80 ms). The records are in `logs/engine/take-0075/`:
+
+| Record                | Runs                                                                    |
+| --------------------- | ----------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends             |
+| `backends.txt`        | the start scene with `take` on both backends, seeds 1 to 12, step 1,503 |
+| `mutations.txt`       | the tests that fail for each of the 59 wrong rules                      |
+| `steps-*.jsonl`       | the time of a step at capacity 1: this branch, `main`, and no rules     |
+
+### 33. Do the levers of the crown keep the bytes of every scene, and what does a step over 8 neighbours cost? [ADR 0086]
+
+Part E5a of the engine of stage 4 (`research/front/ENGINE.md`): the flow over 8 neighbours, the base conductance and
+the flux to the front as settings (`flowEdges`, `flowBase`, `frontFlux`). Their defaults, 4, 0.02 and 1, are those of
+before, and no scene has another value, so every scene must keep its bytes.
+
+**The bytes of the scenes.** The digests as in part 32, with the name `g86-digest-branch`, against the record of part
+32, whose engine `main` has:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g86-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g86-digest-branch.jsonl research/flow/logs/engine/take-0075/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal.
+
+**The wrong rules** of the levers, and the five rules and FP1 whose texts follow the new code:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts $(seq -f 'LV%g' 1 35) TY37 TY126 TY128 TY129 TY134 FP1
+```
+
+Each must fail at least one test.
+
+**The time of a step** of the Maze with the flow, both backends, in turns: `main`, the flow over 8 neighbours as a
+branch on a uniform at 4 neighbours (`research/front/e5a-uniform.ts`), and this branch at 4 and at 8 neighbours. The
+copies lie at the root of the checkout; delete them before `npm run lint`:
+
+```bash
+zsh research/front/e5a-times.sh copies
+zsh research/front/e5a-times.sh run 8
+node research/front/e5a-times.ts
+```
+
+Result: 62 of 62 runs are equal, and each of the 41 wrong rules fails at least one test. A step of the Maze takes
+1.579 ms on WebGPU and 2.047 ms on WebGL2 on `main`, as many with this branch at 4 neighbours (1.579 and 2.037 ms),
+3.2 and 5.1 % more with the branch on a uniform, and 27.9 and 38.2 % more at 8 neighbours (2.020 and 2.829 ms; the
+median of 8 rounds, M3 Pro). The records are in `logs/engine/levers-0086/`:
+
+| Record                | Runs                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                         |
+| `mutations.txt`       | the tests that fail for each of the 41 wrong rules                                  |
+| `steps-*-r*.jsonl`    | the time of a step of the Maze: `main`, `uniform4`, `edges4` and `edges8`, 8 rounds |
+| `turns.txt`           | the order of the runs, with the load of the machine at the start of each            |
+
+### 34. Does the crown of the prototype grow in the app, and does every other scene keep its bytes? [ADR 0087]
+
+Part E5b of the engine of stage 4 (`research/front/ENGINE.md`): the scene Crown of veins, the case `none` of
+`research/front/e2n.sh` (ADR 0084) word for word, and the panel controls of the rules and of the levers. No rule and no
+pass changes, so every other scene must keep its bytes, and the scene must grow as the prototype grew.
+
+**The bytes of the scenes.** The digests as in part 33, with the name `g87-digest-branch`, against the record of part
+33:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g87-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g87-digest-branch.jsonl research/flow/logs/engine/levers-0086/digest-branch.jsonl
+```
+
+It must print that 62 of 62 runs are equal; the two runs of the new scene have no partner in the record.
+
+**The scene against the prototype and between the backends** (`research/front/e5b.sh`; the runs lie in
+`research/front/out/e5b/`): both backends, seeds 1 to 6, to step 1,500 (`backends`, about 2 minutes); the same to step
+2,000 with a record every 50 steps, for the step at which the colony leaves the neck (`neck`); WebGPU seeds 1 and 2 and
+WebGL2 seed 1 to step 16,000 with the states of the steps 8,000, 12,000 and 16,000 (`long`, about 4 minutes); then the
+measures of `e2n.ts` and the pictures of D (`measure`), and the montage with the app's pictures (`montage`, after
+`npx playwright test --project=pictures tests/pictures/crown.spec.ts` on a built app):
+
+```bash
+bash research/front/e5b.sh backends
+node --import ./research/flow/register.mjs research/front/e5b.ts backends=research/front/out/e5b/backends
+bash research/front/e5b.sh neck
+bash research/front/e5b.sh long
+bash research/front/e5b.sh measure
+node --import ./research/flow/register.mjs research/front/e5b.ts growth=research/front/out/e5b/c1 proto=research/flow/logs/engine/crown-0084/c1/none/runs.jsonl
+bash research/front/e5b.sh montage
+```
+
+`node --import ./research/flow/register.mjs research/front/e5b-walls.ts` checks the walls of the scene against
+`neck()` of the prototype.
+
+**The time of a step** of the scene and of the Corn maze from step 3,000, and of the scene from step 15,000, both
+backends, 4 rounds in turns (`research/flow/engine/turns.sh`; about 30 minutes):
+
+```bash
+bash research/front/e5b.sh times
+```
+
+Result: 62 of 62 runs are equal. Both backends grow alike to step 1,500 (the means of 6 seeds differ by 1 % in the
+live agents, the reach and the territory, by 8 % in the sinks), the colony leaves the neck at step 1,150 to 1,450,
+and to step 16,000 the engine gives the prototype's numbers: 7,207 to 7,471 agents against 7,235 and 7,328, a reach of
+209 to 214 cells against 209 and 210, one head, the same sheet behind the rim and the same veins on the arcs (ADR
+0087 has the tables). A step of the scene takes 2.85 ms on WebGPU and 6.18 ms on WebGL2 from step 3,000 in the one
+quiet round, against 1.42 and 1.87 ms of the Corn maze; in the other rounds the machine ran both scenes 2 to 3 times
+slower. The records are in `logs/engine/crown-scene-0087/`:
+
+| Record                | Runs                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                            |
+| `backends.jsonl`      | both backends, seeds 1 to 6, every 500 steps to step 1,500                             |
+| `start.jsonl`         | the same, every 10 steps to step 60: the numbers of the e2e test                       |
+| `neck.jsonl`          | the same, every 50 steps to step 2,000: the exit from the neck                         |
+| `long.jsonl`          | WebGPU seeds 1 and 2 and WebGL2 seed 1, every 500 steps to step 16,000                 |
+| `measures-*.jsonl`    | the measures of `e2n.ts` of the three long runs at the steps 8,000 and 16,000          |
+| `image-*.txt`         | SwiftShader in the image of CI: steps per second, and the e2e tests of the flow        |
+| `steps-*-r*.jsonl`    | the time of a step: the scene and the Corn maze from step 3,000, the scene from 15,000 |
+| `turns.txt`           | the order of the runs, with the load of the machine at the start of each               |
+
+### 35. Do the scenes of Reid et al. 2012 avoid slime with the rules of the growth front? [ADR 0088]
+
+Part E4 of the engine of stage 4 (`research/front/ENGINE.md`): the Y-maze with slime and Slime everywhere turn the rules
+on, the Y-maze gets its two controls (slime on both arms, no slime), and the weight on slime and the reach to fresh
+ground become settings with the constants of before as their defaults. So every other scene must keep its bytes, and
+the four scenes must give what the prototype and the paper give. `research/front/E4-NOTES.md` has the story.
+
+**The bytes of the scenes.** The digests as in part 34, with the name `g88-digest-branch`, against the record of part
+34:
+
+```bash
+VITE_FLOW=1 VITE_NAME=g88-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+```
+
+```bash
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g88-digest-branch.jsonl research/flow/logs/engine/crown-scene-0087/digest-branch.jsonl
+```
+
+It prints that 60 of the 64 runs in both files are equal. The 4 others are the Y-maze with slime and Slime everywhere
+on both backends, which run the rules now; the 4 runs of the two new scenes have no partner. The Crown of veins, the
+other scene with the rules, keeps its bytes: the defaults of the two settings are the constants of before.
+
+**The scenes in the engine** (`research/front/e4.sh`, which runs `research/front/e4-reid.gpu.test.ts`; the runs lie in
+`research/front/out/e4/`, and `bash research/front/e4.sh table` prints the tables of ADR 0088):
+
+```bash
+bash research/front/e4.sh backends   # both backends, seeds 1 to 6, to step 1,500 (about 1.5 minutes)
+bash research/front/e4.sh y          # WebGPU, 40 seeds per case of the Y-maze (about 30 minutes)
+bash research/front/e4.sh ygl        # WebGL2, 40 seeds with slime on one arm, 10 on both and on neither
+bash research/front/e4.sh dish       # both backends, 10 seeds: the dish with and without slime, the open dish
+bash research/front/e4.sh reach      # the study of the reach: the steps from each sink to fresh ground
+bash research/front/e4.sh pics       # the pictures at the first food and at the glucose
+bash research/front/e4.sh montage    # docs/images/reid-y-maze.jpg and docs/images/reid-dish.jpg
+bash research/front/e4.sh times      # the time of a step, both backends, with the rules and without, in turns
+bash research/front/e4.sh table
+```
+
+The prototype's numbers are the records of ADR 0074 (`logs/engine/drift-0074/y/take/` and `dish/take/`):
+
+```bash
+node --import ./research/flow/register.mjs research/front/tables.ts research/flow/logs/engine/drift-0074/y/take
+node --import ./research/flow/register.mjs research/front/dish.ts table=research/flow/logs/engine/drift-0074/dish/take
+```
+
+Result: the four scenes give what the prototype and the paper give, on both backends (ADR 0088 has the tables). With
+slime on one arm the colony takes the blank arm 40 : 0 on each backend (Reid: 39 of 40), with slime on both arms it
+shows no preference (20 : 20) and reaches the first food 1.06 times as late as without slime (the prototype 1.05),
+without slime 66 : 74 over 140 runs (p 0.55); the dish takes as long with slime as without (1.00 and 1.01 times), and
+the open dish of the prototype is half covered after 5,600 to 5,800 steps (the prototype 5,882.5). The colony's own
+slime lies on every cell within one step of each sink, so the least reach with a meaning is 2. A step of the Y-maze
+takes about 0.5 ms on WebGPU and 1.5 ms on WebGL2 with the rules, against 0.2 and 1.2 ms without them. SwiftShader runs
+the Y-maze at 2.15 steps per second in the app and at 16.2 without the picture, in the image of CI on 4 cores; the e2e
+test passes there in 2.6 minutes. The records are in `logs/engine/reid-0088/`:
+
+| Record                | Runs                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| `digest-branch.jsonl` | the digests of every scene after 500 steps on both backends                                      |
+| `backends/`           | the four scenes on both backends, seeds 1 to 6, every 500 steps to step 1,500                    |
+| `y/`                  | the Y-maze: WebGPU 40 seeds per case, WebGL2 40, 10 and 10, every 50 steps                       |
+| `dish/`               | Slime everywhere with and without slime, and the open dish: both backends, 10 seeds              |
+| `reach/`              | the steps from each sink to fresh ground at the steps 1,500 and 3,000                            |
+| `reach2/`, `reach4/`  | the Y-maze with slime on one arm at the reaches 2 and 4, WebGPU, 10 seeds                        |
+| `weight1/`            | the same at the weight 1, the avoidance off                                                      |
+| `gap-*/`              | the open dish on both backends to step 1,000: seeds 1 to 10 with and without the rules, 11 to 40 |
+| `run-check/`          | seeds 1 to 3 with `Sim.run()`, the same records as with `Engine.frame()`                         |
+| `steps-*-r*.jsonl`    | the time of a step: the four scenes with the rules and without them, and the Corn maze           |
+| `image-*.txt`         | SwiftShader in the image of CI: steps per second, and the e2e test                               |
+| `mutations.txt`       | the tests that fail for each of the wrong rules SA1 to SA23                                      |
+| `turns.txt`           | the order of the runs, with the load of the machine at the start of each                         |
+
+### 36. Which scenes change when every birth comes from the budget? [ADR 0100]
+
+Every birth costs one from the budget of the paid births while the rules of the growth front run, a death gives one
+back, each covered food gives the front its flux, and the food credits the budget only up to the agents of the front.
+Only the passes of the rules change, so every scene without them must keep its bytes.
+
+**The bytes of the scenes.** The digests of the branch, and of `main` from a copy of `main` (`git archive`) run with
+`--root`. Keep that copy outside the checkout: the configuration of the research runs takes every
+`research/**/*.gpu.test.ts`, so a copy inside it runs its own tests beside those of the branch, with the code of
+`main`, and both write the same records.
+
+```bash
+VITE_FLOW=1 VITE_NAME=g100-digest-branch npx vitest run --config research/vitest.config.ts research/flow/engine/digest.gpu.test.ts
+node --import ./research/flow/register.mjs research/flow/summary.ts digests research/flow/out/engine/g100-digest-branch.jsonl <main>/research/flow/out/engine/main-digest.jsonl
+```
+
+Result: 58 of 68 runs are equal. The 10 others are the five scenes with the rules on each backend; they differ also
+after 3,000 steps (`VITE_ONLY=y-maze,y-maze-both,y-maze-blank,slime-everywhere,crown VITE_STEPS=3000`).
+
+**The wrong rules** of ADR 0100, and those whose texts follow the code again (about 40 minutes):
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts L3 TY108 TY117 TY142 TY154 TY159 TY160 TY166 TY167 TY168 TY169 TY171 TY172 TY173 TY174 TY177 TY178 TY187 TY190 TY192 TY193 TY195 TY196 TY197 TY199 TY204 TY238 TY251 TY261 LV7 LV8 LV14 LV15 FP15 PB1 PB2 PB3 PB4 PB5 PB6 PB7 PB8 PB9 PB10 PB11 PB12 PB13 PB14 PB15
+```
+
+Result: each of the 49 wrong rules fails at least one test. TY177, PB14 and PB15 needed two more checks: the counts F
+and K of a growth step against the CPU copy (`paid.gpu.test.ts`), and the whole credit of two covered foods while the
+budget lies below the agents of the front (`flow-sinks.gpu.test.ts`).
+
+**The measures** are in ADR 0100: `bash research/front/p100.sh ring|help|y|crown`, and `table` for the table of Food
+ring.
+
+**Parts A and B of ADR 0100** (the share of a sink limits its paid births; the drift of one food). The digests again:
+58 of 68 runs keep the bytes of `main`, the other 10 are the five scenes with the rules. The new wrong rules, and those
+whose texts followed the code:
+
+```bash
+node --import ./research/flow/register.mjs research/flow/engine/mutate.ts PB16 PB17 PB18 PB19 PB20 PB21 PB22 PB23 TY120 TY123 TY159 TY232 TY233 TY234 TY235 TY237 TY246 TY247 TY248 TY250
+```
+
+Result: each fails at least one test. PB16 and PB17 needed a trail in the case of the drift of
+`flow-sinks.gpu.test.ts`: without one every sensor reads 0 less the drift times the pressure, and the size of the
+drift changes no turn.
+
 ## The logs
 
-The logs are one archive in the repository, `logs.tar.gz`: 280 files, 4.6 MB of text. Unpacked,
+The logs are one archive in the repository, `logs.tar.gz`: 927 files, 22.6 MB of text. Unpacked,
 they are these folders. After a new campaign, copy its logs from `out/` into `logs/`, and make
 the archive again with `logs.ts pack`. The unit test holds a digest of the archive, so it then
 asks for the new digest.
@@ -1733,6 +2999,24 @@ asks for the new digest.
 | `logs/engine/light-growth/`                          | the runs of part 15 (ADR 0050): Tokyo with light with Light stops growth at 1, 0.98, 0.9 and 0.5, the digests of every scene, and the wrong rules LG1 to LG11                                                                   | 2026-11-16, M3 Pro                                    |
 | `logs/engine/mazes/`                                 | the runs of part 16 (ADR 0051): the lines of `measure-mazes.ts` for the Snail maze and the Corn maze                                                                                                                            | 2026-11-16, M3 Pro                                    |
 | `logs/engine/starved-ground/`                        | the runs of part 17 (ADR 0053): where children are born, the two mazes and the Tokyo scenes with the rule, the other rules, the digests and the wrong rules SG1 to SG10                                                         | 2026-11-16, M3 Pro                                    |
+| `logs/engine/mark/`                                  | the runs of part 18 (ADR 0054): the analysis of the mark and its time, the campaign with the app, the runs past the fade of the mark, the digests and the wrong rules FL1 to FL10                                               | 2026-11-17, M3 Pro                                    |
+| `logs/engine/slime/`                                 | the runs of part 19 (ADR 0055): the digests of every scene, the Snail maze with a life time of 18 h, the time of a step and of a draw, and the wrong rules SL1 to SL119                                                         | 2026-11-17, M3 Pro                                    |
+| `logs/engine/y-maze/`                                | the runs of part 20 (ADR 0056): the Y-maze with the app and with each rule of the births, of the sensors and of the moves, and the ages of the slime at a birth                                                                 | 2026-11-17, M3 Pro                                    |
+| `logs/engine/film/`                                  | the runs of part 21 (ADR 0057): the digests of every scene, the table of the candidate amounts, the time of a step and of a draw, and the wrong rules SL1 to SL222                                                              | 2026-11-17, M3 Pro                                    |
+| `logs/engine/front/`                                 | the runs of part 22 (ADR 0060): the digests of every scene, the wrong rules, and the e2e times                                                                                                                                  |
+| `logs/view/levels/`                                  | the runs of part 23 (ADR 0062): the black level in eleven cases on each backend, and the wrong rules                                                                                                                            |
+| `logs/panel/`                                        | the wrong rules of part 24 (ADR 0063): the density at a switch to one agent per cell                                                                                                                                            |
+| `logs/engine/scenes-0064/`                           | the runs of part 25 (ADR 0064): the new scenes, the Foraging maze with the flow, the Maze with growth, the digests                                                                                                              |
+| `logs/engine/reid-0066/`                             | the runs of part 26 (ADR 0066): the two scenes of Reid et al. 2012 with the slime and without it, the digests, and the wrong rules SP1 to SP15                                                                                  |
+| `logs/engine/territory-0068/`                        | the runs of part 27 (ADR 0068): the digests of every scene, and the wrong rules TY1 to TY38                                                                                                                                     |
+| `logs/engine/sinks-0069/`                            | the runs of part 28 (ADR 0069): the digests of every scene, and the wrong rules TY39 to TY101                                                                                                                                   |
+| `logs/engine/flow-sinks-0070/`                       | the runs of part 29 (ADR 0070): the digests of every scene, and the wrong rules TY102 to TY140, TY36 and TY37                                                                                                                   |
+| `logs/engine/paid-0071/`                             | the runs of part 30 (ADR 0071): the digests of every scene, the wrong rules, the time of `rank` and of a step                                                                                                                   |
+| `logs/engine/tube-0072/`                             | the runs of part 31 (ADR 0072): the start scene on both backends, the spikes, the CPU checks, the prototype, digests, wrong rules                                                                                               |
+| `logs/engine/take-0075/`                             | the runs of part 32 (ADR 0075): the digests of every scene, the start scene with `take` on both backends, the wrong rules                                                                                                       |
+| `logs/engine/levers-0086/`                           | the runs of part 33 (ADR 0086): the digests of every scene, the wrong rules LV1 to LV35, the time of a step of the Maze                                                                                                         | 2026-11-21, M3 Pro                                    |
+| `logs/engine/crown-scene-0087/`                      | the runs of part 34 (ADR 0087): the digests of every scene, the Crown of veins on both backends and against the prototype, SwiftShader, the time of a step                                                                      | 2026-11-21, M3 Pro                                    |
+| `logs/engine/reid-0088/`                             | the runs of part 35 (ADR 0088): the digests of every scene, the scenes of Reid et al. 2012 on both backends, the reach, SwiftShader, the time of a step, the wrong rules SA1 to SA23                                            | 2026-11-21, M3 Pro                                    |
 
 The first row of a prototype log holds the arguments of its run, and `s` in a row is the time of
 the run in seconds. The name of an engine run says what it is: `g-mz-webgpu-i8-s3` is the Maze on
@@ -1765,7 +3049,7 @@ Notes on the record:
 
 | File                      | What it is                                                                                        |
 | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| `register.mjs`            | lets Node run the TypeScript files                                                                |
+| `register.mjs`            | lets Node run the TypeScript files, and read the shaders that the engine imports as text          |
 | `logs.tar.gz`, `logs.ts`  | the logs of the runs as one archive, and the script that unpacks and packs it                     |
 | `prototype/world.ts`      | the grid of a scene as the app paints it, distances along the maze, pictures                      |
 | `prototype/jones.ts`      | a CPU copy of the agent model (not bit-equal to the GPU)                                          |
@@ -1789,9 +3073,10 @@ Notes on the record:
 | `engine/exact-flux.ts`    | the local solver against an exact solution, on a dump                                             |
 | `engine/radius.ts`        | the local solver with other radii on the fixed network of a dump (2026-11-15)                     |
 | `engine/turns.sh`         | `bench.gpu.test.ts` in checkouts of several commits, in turns (ADR 0038, 2026-11-15)              |
-| `engine/mutate.ts`        | 288 wrong rules, one at a time, against the tests of the flow, of the tubes and of the agents     |
+| `engine/mutate.ts`        | 633 wrong rules, one at a time, against the tests of the flow, the tubes, the agents, the slime   |
 | `engine/births.*`         | where the children of a run are born, by the flow memory of the cell and by zone (ADR 0053)       |
-| `engine/variant.ts`       | other rules of the births in the WGSL passes for one run, for the measurements of ADR 0053        |
+| `engine/variant.ts`       | other rules in the passes for one run, for the measurements of ADR 0053, ADR 0054 and ADR 0056    |
+| `engine/y-maze.*`         | the Y-maze of Reid et al. 2012: its layout, its runs, and `measure-y-maze.ts` for its tables      |
 | `view/tubes.ts`           | pictures of the tubes from a saved state, with the rule of the app and with the rejected rules    |
 | `view/widths.ts`          | how wide the picture of the tubes draws a straight tube, by its band and by its flow memory       |
 | `summary.ts`              | the tables of the ADR from the logs, and the comparison of a rerun with the record                |

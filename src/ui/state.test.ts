@@ -19,6 +19,147 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// The switch of the rule of one agent per cell (ADR 0008, ADR 0063). With the rule, Agents per cell is the share of
+// the cells that hold an agent: at 1 every cell is full, and no agent can move.
+describe('the switch of the rule of one agent per cell', () => {
+  it('gives a scene with several agents per cell Jones’ population, and says so', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    expect([app.settings.collisions, app.settings.density]).toEqual([false, 4]);
+    setRule(true);
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([true, 0.15, 4]);
+    expect(app.notice).toContain('It changed from 4 to 0.15, Jones’ value');
+  });
+
+  it('puts the Agents per cell of before back when the rule goes off again', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    setRule(false);
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([false, 4, undefined]);
+  });
+
+  it('keeps a share of the cells below 1, without a notice', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    app.settings.density = 0.5;
+    setRule(true);
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([true, 0.5, undefined]);
+    expect(app.notice).toBe('');
+    setRule(false);
+    expect(app.settings.density).toBe(0.5);
+  });
+
+  it('keeps an Agents per cell that the user set while the rule was on', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    app.settings.density = 0.3;
+    setRule(false);
+    expect([app.settings.density, app.densityBeforeRule]).toEqual([0.3, undefined]);
+  });
+
+  it('forgets the Agents per cell of before when another scene loads', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    loadPreset('network');
+    expect([app.settings.density, app.densityBeforeRule]).toEqual([0.15, undefined]);
+    setRule(false);
+    // The scene's own 0.15 stays: it is not the value that a switch set.
+    expect(app.settings.density).toBe(0.15);
+  });
+
+  it('forgets the Agents per cell of before when a link opens', async () => {
+    const { app, loadPreset, openLink, setRule } = await fresh();
+    loadPreset('dunes');
+    setRule(true);
+    expect(app.densityBeforeRule).toBe(4);
+    // A link with the rule and Jones' population: the value is the link's own.
+    openLink({ settings: presetById('network')?.settings() ?? defaultSettings() });
+    expect([app.settings.density, app.densityBeforeRule]).toEqual([0.15, undefined]);
+    setRule(false);
+    expect(app.settings.density).toBe(0.15);
+  });
+
+  it('puts it back too after the switch to the Jones model turned the rule on', async () => {
+    const { app, loadPreset, setModel, setRule } = await fresh();
+    loadPreset('dunes');
+    setModel('jones');
+    expect([app.settings.collisions, app.settings.density, app.densityBeforeRule]).toEqual([true, 0.15, 4]);
+    setModel('extended');
+    setRule(false);
+    expect([app.settings.collisions, app.settings.density]).toEqual([false, 4]);
+  });
+
+  it('does nothing when the rule is as asked already', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('network');
+    const before = JSON.stringify(app.settings);
+    setRule(true);
+    expect([JSON.stringify(app.settings), app.notice]).toEqual([before, '']);
+  });
+
+  it('says what a scene made for the rule loses without it, and that growth is off', async () => {
+    const { app, loadPreset, setRule } = await fresh();
+    loadPreset('network');
+    setRule(false);
+    expect(app.notice).toContain('Without one agent per cell, agents pile up');
+    expect(app.notice).not.toContain('Growth and shrinkage');
+    loadPreset('foraging-maze');
+    expect(app.settings.growth).toBe(true);
+    setRule(false);
+    expect(app.notice).toContain('Without one agent per cell');
+    expect(app.notice).toContain('Growth and shrinkage need one agent per cell, so they are off now.');
+    // A scene without the rule that got it and growth from the user: only the notice of growth.
+    loadPreset('dunes');
+    setRule(true);
+    app.settings.growth = true;
+    setRule(false);
+    expect(app.notice).toBe(
+      'Growth and shrinkage need one agent per cell, so they are off now. Switch them on again after you tick the rule.',
+    );
+  });
+});
+
+// The switch of the rules of the growth front (ADR 0098): on, it also sets the levers of the Crown of veins, so that a
+// colony grows faster and forms veins; off, it changes no lever. A scene keeps its own values.
+describe('the switch of the rules of the growth front', () => {
+  it('sets the levers of the Crown of veins when it turns the rules on', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('food-ring');
+    const s = app.settings;
+    expect([s.territory, s.flowEdges, s.flowBase, s.frontFlux, s.flowStrength]).toEqual([false, 4, 0.02, 1, 2]);
+    setRules(true);
+    expect([s.territory, s.flowEdges, s.flowBase, s.frontFlux, s.flowStrength]).toEqual([true, 8, 0.002, 2, 8]);
+  });
+
+  it('keeps a Flow strength above 8', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('food-ring');
+    app.settings.flowStrength = 16;
+    setRules(true);
+    expect(app.settings.flowStrength).toBe(16);
+  });
+
+  it('changes no lever when it turns the rules off', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('y-maze');
+    const s = app.settings;
+    Object.assign(s, { flowEdges: 4, flowBase: 0.05, frontFlux: 3, flowStrength: 1 });
+    setRules(false);
+    expect([s.territory, s.flowEdges, s.flowBase, s.frontFlux, s.flowStrength]).toEqual([false, 4, 0.05, 3, 1]);
+  });
+
+  it('changes nothing when the rules are as asked already', async () => {
+    const { app, loadPreset, setRules } = await fresh();
+    loadPreset('y-maze');
+    const before = JSON.stringify(app.settings);
+    setRules(true);
+    expect(JSON.stringify(app.settings)).toBe(before);
+  });
+});
+
 describe('the current scene', () => {
   it('is the loaded preset, unchanged until a model parameter changes', async () => {
     const { app, loadPreset, sceneChanged } = await fresh();
@@ -80,6 +221,22 @@ describe('the current scene', () => {
     app.settings.showTubes = true;
     loadPreset('maze');
     expect(app.settings.showTubes).toBe(true);
+  });
+
+  // So is the film of the slime (ADR 0055, decision 8).
+  it('keeps the film of the slime on a new scene, and does not count it as a change', async () => {
+    const { app, loadPreset, sceneChanged } = await fresh();
+    loadPreset('snail-maze');
+    expect(app.settings.showSlime).toBe(true);
+    app.settings.showSlime = false;
+    expect(sceneChanged()).toBe(false);
+    loadPreset('maze');
+    expect(app.settings.showSlime).toBe(false);
+    expect(app.sceneBase?.showSlime).toBe(false);
+    expect(sceneChanged()).toBe(false);
+    app.settings.showSlime = true;
+    loadPreset('snail-maze');
+    expect(app.settings.showSlime).toBe(true);
   });
 
   it('does not count a grid the device lowered as a change', async () => {
@@ -500,6 +657,24 @@ describe('a shared link', () => {
     setEngine(undefined);
   });
 
+  // ADR 0087: a link holds the rules of the growth front and the levers of the crown while they are on (linkSettings()),
+  // so a link of the Crown of veins opens the scene as it is.
+  it('of the Crown of veins opens it with its rules and its levers, unchanged', async () => {
+    const first = await fresh();
+    first.loadPreset('crown');
+    const { hash, dropped } = await encodeLink(structuredClone(first.app.settings), first.currentDrawing());
+    expect(dropped).toBe(false);
+    const { app, openLink, sceneChanged } = await fresh();
+    const link = await decodeLink(hash);
+    if (!link) throw new Error('no link');
+    openLink(link);
+    expect(app.scene).toBe('crown');
+    expect(app.settings).toEqual(first.app.settings);
+    expect(sceneChanged()).toBe(false);
+    const s = app.settings;
+    expect([s.territory, s.drift, s.flowEdges, s.flowBase, s.frontFlux]).toEqual([true, 1.5, 8, 0.002, 2]);
+  });
+
   // ADR 0027: a link made before a scene's shapes changed paints the shapes it was made with, and says that it changes
   // the scene; Reload scene loads the scene's shapes of now.
   it("of an earlier revision of the scene's shapes paints those shapes, and Reload scene the newest", async () => {
@@ -707,20 +882,65 @@ describe('dead agents for the inoculate tool', () => {
 // and says what went, a switch to Extended keeps Jones' values, and the tools offered follow the model.
 describe('the model switch', () => {
   const BASE = 'The Jones model has only Jones’ rules.';
+  /** The settings that decide the tools: the model and the Slime life time, as a scene has them. */
+  const EXTENDED = { model: 'extended', slimeLife: 144 } as const;
+  const JONES = { model: 'jones', slimeLife: 144 } as const;
 
   // ADR 0044: Jones' papers have repellent sources, and no light that releases a repellent. Both models offer every
-  // tool with its key; the Jones model names the Light tool Repellent, and no text of it says light.
-  it('offers every tool in both models, and names light a repellent in the Jones model', async () => {
+  // tool with its key, but for the Slime tool, which the Jones model does not have (ADR 0055). The Jones model names the
+  // Light tool Repellent, and no text of it says light.
+  it('offers every tool but Slime in both models, and names light a repellent in the Jones model', async () => {
     const { TOOLS, lightName, toolsFor } = await fresh();
-    expect(toolsFor('extended')).toEqual(TOOLS);
-    const jones = toolsFor('jones');
-    expect(jones.map((t) => [t.id, t.key])).toEqual(TOOLS.map((t) => [t.id, t.key]));
+    expect(toolsFor(EXTENDED)).toEqual(TOOLS);
+    const jones = toolsFor(JONES);
+    const shared = TOOLS.filter((t) => t.id !== 'slime');
+    expect(jones.map((t) => [t.id, t.key])).toEqual(shared.map((t) => [t.id, t.key]));
     expect(jones.find((t) => t.id === 'light')?.label).toBe('Repellent');
-    expect(jones.filter((t) => /light/i.test(`${t.label} ${t.help}`))).toEqual([]);
+    expect(jones.filter((t) => /light|slime/i.test(`${t.label} ${t.help}`))).toEqual([]);
     expect(jones.filter((t) => t.id !== 'light' && t.id !== 'erase')).toEqual(
-      TOOLS.filter((t) => t.id !== 'light' && t.id !== 'erase'),
+      shared.filter((t) => t.id !== 'light' && t.id !== 'erase'),
     );
     expect([lightName('jones'), lightName('extended')]).toEqual(['repellent', 'light']);
+  });
+
+  // ADR 0055, decision 7: the Slime tool is there while the model has slime, in the extended model with a Slime life
+  // time above 0. It paints strokes of its own kind, and Clear and Erase name the slime that they remove.
+  it('offers the Slime tool only while the model has slime', async () => {
+    const { TOOLS, clearLabel, strokeKind, toolsFor } = await fresh();
+    const slime = toolsFor(EXTENDED).find((t) => t.id === 'slime');
+    expect([slime?.key, slime?.label]).toEqual(['9', 'Slime']);
+    expect(slime?.help).toContain('Slime life time');
+    expect(TOOLS.at(-1)).toEqual(slime);
+    for (const s of [JONES, { ...EXTENDED, slimeLife: 0 }, { ...JONES, slimeLife: 0 }]) {
+      expect(toolsFor(s).map((t) => t.id)).toEqual(TOOLS.filter((t) => t.id !== 'slime').map((t) => t.id));
+      expect(clearLabel(s)).toBe(`Clear food, ${s.model === 'jones' ? 'repellent' : 'light'}, walls and electrodes`);
+    }
+    for (const slimeLife of [1, 18, 240]) expect(toolsFor({ ...EXTENDED, slimeLife })).toEqual(TOOLS);
+    // Every key selects one tool.
+    expect(new Set(TOOLS.map((t) => t.key)).size).toBe(TOOLS.length);
+    expect(strokeKind('slime', 'anode')).toBe('slime');
+    expect(clearLabel(EXTENDED)).toBe('Clear food, light, walls, electrodes and slime');
+    expect(toolsFor(EXTENDED).find((t) => t.id === 'erase')?.help).toContain('electrodes and slime');
+  });
+
+  // When the model loses its slime, the first tool is selected: the toolbar has no Slime tool then. Every other tool
+  // stays selected.
+  it('selects the first tool when the model loses its slime while the Slime tool is selected', async () => {
+    const { TOOLS, app, keepTool } = await fresh();
+    for (const tool of TOOLS.map((t) => t.id)) {
+      app.tool = tool;
+      keepTool(EXTENDED);
+      expect(app.tool).toBe(tool);
+      for (const s of [JONES, { ...EXTENDED, slimeLife: 0 }]) {
+        app.tool = tool;
+        keepTool(s);
+        expect(app.tool, tool).toBe(tool === 'slime' ? 'pan' : tool);
+      }
+    }
+    expect(TOOLS[0].id).toBe('pan');
+    // The slime comes back, and the selection stays where it is.
+    keepTool(EXTENDED);
+    expect(app.tool).toBe('pan');
   });
 
   // ADR 0047: the Electrode tool paints the pole that the toolbar selects; the other brush tools paint their own
@@ -738,11 +958,12 @@ describe('the model switch', () => {
       'erase',
       undefined,
       'anode',
+      'slime',
     ]);
-    for (const model of ['jones', 'extended'] as const) {
-      const tool = toolsFor(model).find((t) => t.id === 'electrode');
+    for (const settings of [JONES, EXTENDED]) {
+      const tool = toolsFor(settings).find((t) => t.id === 'electrode');
       expect([tool?.key, tool?.label]).toEqual(['8', 'Electrode']);
-      expect(toolsFor(model).find((t) => t.id === 'erase')?.help).toContain('electrodes');
+      expect(toolsFor(settings).find((t) => t.id === 'erase')?.help).toContain('electrodes');
     }
   });
 
@@ -756,7 +977,7 @@ describe('the model switch', () => {
     expect([s.model, jonesFits(s), s.strains.length, s.collisions, s.diffusion]).toEqual(['jones', true, 1, true, 1]);
     expect([app.strainOrigin, app.strain, app.tool]).toEqual([[0], 0, 'light']); // the tool stays: Repellent
     expect(app.notice).toBe(
-      `${BASE} It removed strains B to C and agents that share a cell. It changed Agents per cell from 3 to 1, ` +
+      `${BASE} It removed strains B to C and agents that share a cell. It changed Agents per cell from 3 to 0.15, ` +
         'Diffusion passes from 2 to 1 and Scent decay from 0.1 to 0.6 (the Decay of strain A).',
     );
   });
@@ -776,6 +997,32 @@ describe('the model switch', () => {
     expect([app.settings.model, app.settings.flow]).toEqual(['extended', false]);
   });
 
+  // ADR 0087: the Crown of veins has the rules of the growth front and the levers of the crown. The switch to Jones
+  // names the rules it removed; their drift and flux to the front, and the base conductance of the flow, mean nothing
+  // without them, so the notice skips them, as it skips the flow strength. So do the weight on slime and the reach to
+  // fresh ground of the rules (ADR 0088).
+  it('to Jones takes the rules of the growth front off and names them, not their values', async () => {
+    const { app, loadPreset, setModel } = await fresh();
+    loadPreset('crown');
+    expect([app.settings.territory, app.settings.frontFlux, app.settings.flowEdges]).toEqual([true, 2, 8]);
+    Object.assign(app.settings, { drift: 3, slimeWeight: 0.3, freshReach: 3 });
+    setModel('jones');
+    const s = app.settings;
+    expect([s.model, s.territory, s.flow, s.drift, s.frontFlux, s.flowEdges, s.flowBase]).toEqual([
+      'jones',
+      false,
+      false,
+      1.5,
+      1,
+      4,
+      0.02,
+    ]);
+    expect([s.slimeWeight, s.freshReach]).toEqual([0.025, 6]);
+    expect(app.notice).toContain('It removed the flow in the tubes and the rules of the growth front.');
+    for (const label of ['Drift', 'Flux to the front', 'Base conductance', 'Flow strength', 'on slime', 'fresh ground'])
+      expect(app.notice, label).not.toContain(label);
+  });
+
   // Every value that toJones() changes is in the notice, also those that the panel of the extended model shows
   // elsewhere: the weights of strain A and no diffusion. The light strength stays: it is the strength of the repellent
   // (ADR 0044), and the notice says that the drawn light acts as one.
@@ -789,9 +1036,10 @@ describe('the model switch', () => {
     Object.assign(app.settings, { diffusion: 0, trailSaturation: 30, scentDecay: 0.01 });
     setModel('jones');
     expect(app.notice).toBe(
-      `${BASE} The light acts as a repellent source in Jones’ trail map. It changed Diffusion passes from 0 to 1, ` +
-        'Scent decay from 0.01 to 0.1 (the Decay of strain A), Trail saturation from 30 to 0, the weight of strain A ' +
-        'on its own trail from +0.5 to +1, Food attraction from +0.4 to +1 and Light avoidance from +2 to +1.',
+      `${BASE} The light acts as a repellent source in Jones’ trail map. It removed the flow in the tubes. It changed ` +
+        'Diffusion passes from 0 to 1, Scent decay from 0.01 to 0.1 (the Decay of strain A), Trail saturation from 30 ' +
+        'to 0, the weight of strain A on its own trail from +0.5 to +1, Food attraction from +0.4 to +1 and Light ' +
+        'avoidance from +2 to +1.',
     );
     expect(app.settings.strains[0]?.share).toBe(1);
     expect(app.settings.lightStrength).toBe(0.2);
@@ -830,6 +1078,25 @@ describe('the model switch', () => {
     expect(app.notice).toBe(
       `${BASE} The walls stop agents, but they do not block sensors. It removed the flow in the tubes.`,
     );
+  });
+
+  // The Jones model has no slime (ADR 0055, decision 10): painted slime stays in the drawing, and the notice says that
+  // it is gone until the extended model runs again.
+  it('to Jones says that painted slime is gone until the extended model runs again', async () => {
+    const { app, drawn, loadPreset, setEngine, setModel, startScene } = await fresh();
+    loadPreset('network');
+    setModel('extended');
+    const canvas = { width: 1600, height: 1000 } as HTMLCanvasElement;
+    const engine = await Engine.create(canvas, structuredClone(app.settings), undefined, new CpuBackend());
+    setEngine(engine);
+    await startScene(engine);
+    engine.paint({ kind: 'slime', from: [100, 100], to: [140, 100], radius: 5 });
+    expect(drawn('slime')).toBe(true);
+    setModel('jones');
+    expect(app.notice).toBe(`${BASE} The painted slime is gone until you switch back to the extended model.`);
+    // The stroke stays in the drawing, so a link holds it.
+    expect(drawn('slime')).toBe(true);
+    setEngine(undefined);
   });
 
   it('to Jones is not possible without the rule, and changes nothing then', async () => {
@@ -896,19 +1163,25 @@ describe('the model switch', () => {
 
   it('to Jones and back changes an extended scene that fits Jones only for the switch itself', async () => {
     const { app, loadPreset, sceneChanged, setModel } = await fresh();
-    // Foraging maze is extended for its walls alone. The Maze also has the flow in the tubes, which stays off after
-    // the way back (ADR 0029).
+    // Without the flow in the tubes, the Foraging maze is extended for its walls alone: the way to Jones and back
+    // gives its settings again.
     loadPreset('foraging-maze');
+    app.settings.flow = false;
+    const before = JSON.parse(JSON.stringify(app.settings)) as Settings;
     setModel('jones');
-    expect(sceneChanged()).toBe(true);
+    expect(app.settings.model).toBe('jones');
     setModel('extended');
-    expect(sceneChanged()).toBe(false);
-    expect(app.settings).toEqual({ ...sceneOf('foraging-maze'), seed: app.settings.seed });
-    loadPreset('maze');
-    setModel('jones');
-    setModel('extended');
-    expect(sceneChanged()).toBe(true);
-    expect(app.settings).toEqual({ ...sceneOf('maze'), seed: app.settings.seed, flow: false });
+    expect(app.settings).toEqual(before);
+    // The scenes of Start here and of Experiments have the flow in the tubes, which the Jones model takes off. It
+    // stays off after the way back (ADR 0029), and nothing else changes.
+    for (const id of ['foraging-maze', 'maze']) {
+      loadPreset(id);
+      setModel('jones');
+      expect(sceneChanged(), id).toBe(true);
+      setModel('extended');
+      expect(sceneChanged(), id).toBe(true);
+      expect(app.settings, id).toEqual({ ...sceneOf(id), seed: app.settings.seed, flow: false });
+    }
   });
 
   it('is undone by Reload scene, which restores the model of the scene', async () => {
@@ -924,7 +1197,8 @@ describe('the model switch', () => {
 });
 
 describe('the tools of the model', () => {
-  // Both models have every tool (ADR 0044), so no load and no switch of the model changes the selected tool.
+  // Both models have every tool but Slime (ADR 0044, ADR 0055), so no load and no switch of the model changes the
+  // selected tool. The Slime tool goes with the slime of the model (keepTool(), above).
   it('stay selected when a scene loads, the model switches or a link opens', async () => {
     const { app, loadPreset, openLink, setModel } = await fresh();
     for (const tool of ['light', 'food'] as const) {

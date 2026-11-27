@@ -1,11 +1,14 @@
 import type { Engine } from '../engine/engine';
 import type { EnvTool, Pole } from '../engine/types';
 import { strainAgents } from '../engine/pack';
+import { slimeSteps } from '../engine/slime';
 import { drawingOf, kindsOf, type Drawing } from '../model/link';
 import {
   constrain,
+  crownLevers,
   defaultSettings,
   globalSpec,
+  JONES_DENSITY,
   MAX_STRAINS,
   MEAN_WINDOW,
   RESOLUTIONS,
@@ -13,11 +16,20 @@ import {
   strainLike,
   strainSpec,
   toJones,
+  withRule,
   type Lattice,
   type Model,
   type Settings,
 } from '../model/params';
-import { presetById, RULE_MISSING_NOTICE, shapeRevision, shapesAt, usesRule, type Preset } from '../model/presets';
+import {
+  presetById,
+  RULE_MISSING_NOTICE,
+  ruleOffNotice,
+  shapeRevision,
+  shapesAt,
+  usesRule,
+  type Preset,
+} from '../model/presets';
 import { fmt, letter, list, modelChanged, signed } from '../model/scene';
 import type { Link } from '../model/url';
 import { latticeResolution, type GridTuner } from './tune';
@@ -52,7 +64,7 @@ export const TOOLS = [
     id: 'erase',
     key: '6',
     label: 'Erase',
-    help: 'Remove food, light, walls and electrodes. Hold Shift and click two points for a straight line.',
+    help: 'Remove food, light, walls, electrodes and slime. Hold Shift and click two points for a straight line.',
   },
   {
     id: 'cut',
@@ -65,6 +77,12 @@ export const TOOLS = [
     key: '8',
     label: 'Electrode',
     help: 'Place the poles of an electric current. Physarum grows toward the cathode. The cathode releases an attractant and the anode a repellent, both with Electrode strength. Choose the pole beside the brush. Hold Shift and click two points for a straight line.',
+  },
+  {
+    id: 'slime',
+    key: '9',
+    label: 'Slime',
+    help: 'Coat the ground with slime, as a colony leaves it where it was. Painted slime ages as the slime of a colony does: it is gone after the Slime life time. Hold Shift and click two points for a straight line.',
   },
 ] as const;
 
@@ -86,18 +104,43 @@ const JONES_TOOLS: Partial<Record<Tool, { label?: string; help: string }>> = {
   },
 };
 
-/** The tools as a model names them: the same tools and keys in both models, with the names of JONES_TOOLS in Jones. */
-export const toolsFor = (model: Model): readonly { id: Tool; key: string; label: string; help: string }[] =>
-  model === 'jones' ? TOOLS.map((t) => ({ ...t, ...JONES_TOOLS[t.id] })) : TOOLS;
+/** The settings that decide which tools there are (toolsFor()). */
+type ToolSettings = Pick<Settings, 'model' | 'slimeLife'>;
 
-/** "light" as a model names it in a sentence: Jones' repellent (ADR 0044), or this app's light. */
+/**
+ * The tools as the settings have them: the same tools and keys in both models, with the names of JONES_TOOLS in Jones.
+ * The Slime tool is there only while the model has slime (ADR 0055, decision 7): in the extended model with a Slime
+ * life time above 0.
+ */
+export const toolsFor = (s: ToolSettings): readonly { id: Tool; key: string; label: string; help: string }[] => {
+  const tools = slimeSteps(s) > 0 ? TOOLS : TOOLS.filter((t) => t.id !== 'slime');
+  return s.model === 'jones' ? tools.map((t) => ({ ...t, ...JONES_TOOLS[t.id] })) : tools;
+};
+
+/**
+ * Selects the first tool when the settings do not have the selected one (toolsFor()): the Slime tool goes with the
+ * slime of the model. Every other tool is there with every setting. App.svelte calls this when the settings change.
+ */
+export function keepTool(s: ToolSettings) {
+  if (!toolsFor(s).some((t) => t.id === app.tool)) app.tool = TOOLS[0].id;
+}
+
 /** The kind of stroke that a tool paints, or undefined for a tool that paints none: the Electrode tool paints its pole. */
 export function strokeKind(tool: Tool, pole: Pole): EnvTool | undefined {
   if (tool === 'electrode') return pole;
-  return tool === 'food' || tool === 'light' || tool === 'wall' || tool === 'erase' ? tool : undefined;
+  const paints = tool === 'food' || tool === 'light' || tool === 'wall' || tool === 'erase' || tool === 'slime';
+  return paints ? tool : undefined;
 }
 
+/** "light" as a model names it in a sentence: Jones' repellent (ADR 0044), or this app's light. */
 export const lightName = (model: Model) => (model === 'jones' ? 'repellent' : 'light');
+
+/**
+ * The label of Clear, with what it removes as the settings name it: light is Jones' repellent, and slime is there only
+ * while the model has it (ADR 0055, decision 7: Clear clears every stamp).
+ */
+export const clearLabel = (s: ToolSettings) =>
+  `Clear food, ${lightName(s.model)}, walls${slimeSteps(s) > 0 ? ', electrodes and slime' : ' and electrodes'}`;
 
 export const LEARN_TABS = ['Physarum', 'The model', 'Controls', 'Scenes', 'About'] as const;
 
@@ -173,6 +216,12 @@ export interface AppState {
   linkBase: Settings | undefined;
   /** The backend supports one agent per cell (WebGL2 needs EXT_float_blend). */
   canCollide: boolean;
+  /**
+   * The Agents per cell that a switch to the rule of one agent per cell replaced with Jones' value (setRule(),
+   * setModel(), ADR 0063): a switch back puts it back while Agents per cell is still Jones' value. Undefined after
+   * that switch back and after a new scene or a link.
+   */
+  densityBeforeRule: number | undefined;
   stats: Stats;
 }
 
@@ -203,6 +252,7 @@ export const app = $state<AppState>({
   lostLattice: null,
   linkBase: undefined,
   canCollide: true,
+  densityBeforeRule: undefined,
   stats: { fps: 0, stepsPerSecond: 0, step: 0, alive: [], run: -1 },
 });
 
@@ -217,6 +267,10 @@ export function setScene(p: Preset) {
   s.showScent = app.settings.showScent;
   // So is the picture of the tubes (ADR 0034).
   s.showTubes = app.settings.showTubes;
+  // And the film of the slime (ADR 0055, decision 8).
+  s.showSlime = app.settings.showSlime;
+  // And the skirt of the growth front (ADR 0060).
+  s.showFront = app.settings.showFront;
   // And the colour of the gel: the style is the scene's, the colour of its gel is the user's (ADR 0009).
   s.gelColor = app.settings.gelColor;
   // Without the rule a scene of Jones runs on the extended model: the Jones model always has it (constrain()).
@@ -232,6 +286,8 @@ export function setScene(p: Preset) {
   app.strainOrigin = s.strains.map((_, i) => i);
   // The inoculate tool places the selected strain, and a scene with fewer strains has no such strain.
   app.strain = Math.min(app.strain, s.strains.length - 1);
+  // The density that a switch to the rule replaced belonged to the scene before.
+  app.densityBeforeRule = undefined;
 }
 
 let ruleNoticeShown = false;
@@ -284,6 +340,7 @@ export function clearEnvironment() {
 export function openLink({ settings, drawing, drawingLost }: Link) {
   app.settings = settings;
   app.linkBase = structuredClone(settings);
+  app.densityBeforeRule = undefined;
   linkDrawing = drawing;
   app.envVersion++;
   if (drawingLost) showNotice('This app cannot read the scene and drawing in this link, so only its settings load.');
@@ -377,6 +434,57 @@ export function ruleUnavailable() {
   noteMissingRule();
 }
 
+/** Shown when the rule goes off while growth is on: constrain() turns growth off with it. */
+const GROWTH_OFF =
+  'Growth and shrinkage need one agent per cell, so they are off now. Switch them on again after you tick the rule.';
+
+/**
+ * The panel's switch of the rule of one agent per cell (ADR 0008). The engine restarts the population on every
+ * switch, so agents stacked without the rule do not stay stacked.
+ *
+ * On: settings with 1 agent per cell or more get Jones' population (withRule(), ADR 0063), and a notice says so: at 1
+ * every cell would hold an agent, and none could move. Off: the Agents per cell that the switch on replaced comes
+ * back, while the value is still the one that the switch set. A scene made for the rule gets the notice of what
+ * changes without it, and growth, which needs the rule, the notice that it is off.
+ */
+export function setRule(on: boolean) {
+  const s = app.settings;
+  if (on === s.collisions) return;
+  if (on) {
+    const { density } = withRule($state.snapshot(s));
+    if (density !== s.density) {
+      app.densityBeforeRule = s.density;
+      showNotice(
+        `With one agent per cell, Agents per cell is the share of the cells that hold an agent. It changed from ${fmt(s.density)} to ${fmt(density)}, Jones’ value: at 1 every cell is full, and no agent can move.`,
+        12_000,
+      );
+      s.density = density;
+    }
+    s.collisions = true;
+    return;
+  }
+  const growing = s.growth;
+  s.collisions = false;
+  if (app.densityBeforeRule !== undefined && s.density === JONES_DENSITY) s.density = app.densityBeforeRule;
+  app.densityBeforeRule = undefined;
+  const scene = presetById(app.scene);
+  const growth = growing ? ` ${GROWTH_OFF}` : '';
+  if (scene && usesRule(scene)) showNotice(ruleOffNotice(scene) + growth, 15_000);
+  else if (growing) showNotice(GROWTH_OFF);
+}
+
+/**
+ * The panel's switch of the rules of the growth front (ADR 0068, ADR 0087). On, it also sets the levers of the Crown
+ * of veins (crownLevers(), ADR 0098), so that a colony grows faster and forms veins; off, it changes no lever. The
+ * engine restarts the population on every switch (territoryOn()).
+ */
+export function setRules(on: boolean) {
+  const s = app.settings;
+  if (on === s.territory) return;
+  s.territory = on;
+  if (on) Object.assign(s, crownLevers(s));
+}
+
 /**
  * The panel's model choice. A switch to Jones keeps only what Jones' model has (toJones()): strain A, one agent per
  * cell, one diffusion pass, and the scent bound to the trail. A notice says what went (jonesChanges()). The extended
@@ -402,6 +510,8 @@ export function setModel(model: Model) {
     return;
   }
   const next = toJones(s);
+  // The switch turns the rule on: a switch of the rule back puts the Agents per cell of before back (setRule()).
+  if (!s.collisions && next.density !== s.density) app.densityBeforeRule = s.density;
   app.settings = next;
   app.strainOrigin = app.strainOrigin.slice(0, 1);
   app.strain = 0;
@@ -410,10 +520,16 @@ export function setModel(model: Model) {
   const walls = kinds.has('wall') ? ' The walls stop agents, but they do not block sensors.' : '';
   // Drawn light stays and acts: the Jones model reads it as a repellent source of its trail map (ADR 0044).
   const light = kinds.has('light') ? ' The light acts as a repellent source in Jones’ trail map.' : '';
-  const text = `The Jones model has only Jones’ rules.${light}${walls}${jonesChanges(s, next)}`;
+  // The Jones model has no slime (ADR 0055, decision 10): painted slime stays in the drawing and is painted again in
+  // the extended model.
+  const slime = kinds.has('slime') ? ' The painted slime is gone until you switch back to the extended model.' : '';
+  const text = `The Jones model has only Jones’ rules.${light}${walls}${slime}${jonesChanges(s, next)}`;
   // About 3.3 words per second, as for the other long notices.
   showNotice(text, Math.max(10_000, text.split(' ').length * 300));
 }
+
+/** The settings that a notice of a switch to Jones skips with the flow or the rules (jonesChanges()). */
+const FLOW_OR_RULES = new Set<string>(['flowStrength', 'flowBase', 'drift', 'frontFlux', 'slimeWeight', 'freshReach']);
 
 /**
  * What toJones() changed, for the notice of the switch (ADR 0022, decision 28): the strains and the agents that share
@@ -427,10 +543,15 @@ function jonesChanges(s: Settings, next: Settings): string {
     !s.collisions && 'agents that share a cell',
     // The Jones model never has the flow (ADR 0029); its strength then means nothing, so the list of changes skips it.
     s.flow && 'the flow in the tubes',
+    // Nor the rules of the growth front (ADR 0068), which the panel switches since ADR 0087.
+    s.territory && 'the rules of the growth front',
   ].filter((v): v is string => typeof v === 'string');
   const changed: string[] = [];
   for (const k of Object.keys(globalSpec) as (keyof typeof globalSpec)[]) {
-    if (k === 'flowStrength') continue;
+    // The strength and the base conductance of the flow (ADR 0086) mean nothing without the flow, and the drift, the
+    // flux to the front, the weight on slime and the reach to fresh ground nothing without the rules (ADR 0070, ADR
+    // 0086, ADR 0088), as said above.
+    if (FLOW_OR_RULES.has(k)) continue;
     const why = k === 'scentDecay' ? ' (the Decay of strain A)' : '';
     if (s[k] !== next[k]) changed.push(`${globalSpec[k].label} from ${fmt(s[k])} to ${fmt(next[k])}${why}`);
   }

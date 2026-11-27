@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain } from '../model/params';
+import { defaultSettings, defaultStrain, globalSpec } from '../model/params';
 import {
   FLOW,
   FLOW_BYTES,
@@ -8,12 +9,15 @@ import {
   FLOW_ITERATIONS,
   FLOW_LANES,
   FLOW_SITES,
+  FLOW_EIGHT,
   FLOW_SLOTS,
+  flowEight,
   flowOn,
   flowRoles,
   heldTrail,
   JONES_DECAY,
   packFlow,
+  recoverShare,
   STEPS_PER_MINUTE,
   trailLevels,
 } from './flow';
@@ -26,6 +30,40 @@ describe('flowOn', () => {
     expect(flowOn({ flow: false, model: 'extended' })).toBe(false);
     expect(flowOn({ flow: true, model: 'jones' })).toBe(false);
     expect(flowOn(defaultSettings())).toBe(false);
+  });
+});
+
+// ADR 0086: the flow over 8 neighbours, with the weights of ADR 0081.
+describe('the flow over 8 neighbours', () => {
+  it('runs only with the setting 8 while the flow runs', () => {
+    expect(flowEight({ flow: true, model: 'extended', flowEdges: 8 })).toBe(true);
+    expect(flowEight({ flow: true, model: 'extended', flowEdges: 4 })).toBe(false);
+    expect(flowEight({ flow: false, model: 'extended', flowEdges: 8 })).toBe(false);
+    expect(flowEight({ flow: true, model: 'jones', flowEdges: 8 })).toBe(false);
+    expect(flowEight(defaultSettings())).toBe(false);
+  });
+
+  it('weighs an axis edge √2 − 1 and a diagonal edge 1 − 1/√2, so a sheet conducts as with 4 edges', () => {
+    expect(FLOW_EIGHT.axis).toBeCloseTo(0.414213562, 9);
+    expect(FLOW_EIGHT.diag).toBeCloseTo(0.292893219, 9);
+    expect(FLOW_EIGHT.diag / FLOW_EIGHT.axis).toBeCloseTo(Math.SQRT1_2, 12);
+    expect(FLOW_EIGHT.axis + 2 * FLOW_EIGHT.diag).toBeCloseTo(1, 12);
+  });
+
+  it('gives the passes the weights as float32 literals', () => {
+    // AXIS and DIAG in flow.wgsl, flow.frag, tubes.wgsl and tubes.frag: each literal is the float32 of its weight.
+    const files = ['./shaders/flow.wgsl', './gl/glsl/flow.frag', './shaders/tubes.wgsl', './gl/glsl/tubes.frag'];
+    for (const file of files) {
+      const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+      for (const [name, weight] of [
+        ['AXIS', FLOW_EIGHT.axis],
+        ['DIAG', FLOW_EIGHT.diag],
+      ] as const) {
+        const found = [...source.matchAll(new RegExp(`const (?:float )?${name} = ([0-9.]+);`, 'g'))];
+        expect(found.length, `${name} in ${file}`).toBe(1);
+        expect(Math.fround(Number(found[0]?.[1])), `${name} in ${file}`).toBe(Math.fround(weight));
+      }
+    }
   });
 });
 
@@ -44,10 +82,13 @@ describe('the time scale (ADR 0029)', () => {
     expect(minutes(starve)).toBeLessThan(40);
     // The foods keep their roles for 10 min.
     expect(minutes(FLOW_HOLD)).toBe(10);
-    // Starved ground is fresh again after about 18 h.
+    // Starved ground is fresh again after about 6 days, and open for births again after 3.7 days (ADR 0054): slime
+    // from a large culture is avoided for up to 6 days (Reid et al. 2013, as Tröger et al. 2024 cite it, p. 3).
     const fresh = Math.log(FLOW.fresh / FLOW.floor) / Math.log(1 + FLOW.recover);
-    expect(minutes(fresh) / 60).toBeGreaterThan(17);
-    expect(minutes(fresh) / 60).toBeLessThan(19);
+    expect(minutes(fresh) / 60 / 24).toBeGreaterThan(6);
+    expect(minutes(fresh) / 60 / 24).toBeLessThan(6.2);
+    const open = Math.log(FLOW.half / FLOW.floor) / Math.log(1 + FLOW.recover);
+    expect(minutes(open) / 60 / 24).toBeCloseTo(3.7, 1);
   });
 
   it('lets few agents starve on fresh ground: half of a colony without a flux in about 8 hours', () => {
@@ -67,6 +108,10 @@ describe('the time scale (ADR 0029)', () => {
     expect(FLOW.birthFrom).toBeLessThan(1);
     expect(FLOW.trailLow).toBeLessThan(FLOW.trailFull);
     expect(FLOW.ghost).toBeLessThan(FLOW.base * FLOW.bodyLow);
+    // So at every value of the setting Base conductance, whose default FLOW.base is (ADR 0086): the weakest tube, of
+    // the least body and the floor of the memory, conducts more than 5 times the ghost.
+    expect(defaultSettings().flowBase).toBe(FLOW.base);
+    expect(5 * FLOW.ghost).toBeLessThan(FLOW.bodyLow * (globalSpec.flowBase.min + FLOW.floor));
   });
 });
 
@@ -165,7 +210,9 @@ describe('packFlow', () => {
 
   it('has the size of the uniform block of the passes', () => {
     expect(FLOW_CONSTANT_SLOTS).toBe(7);
-    expect(FLOW_SLOTS).toBe(FLOW_CONSTANT_SLOTS + FLOW_SITES);
+    // Four slots of the constants of stage 4 after the sites: two of the push, one of the sinks and one of what the
+    // sinks take (territory.ts packTerritory(), ADR 0068 to ADR 0070).
+    expect(FLOW_SLOTS).toBe(FLOW_CONSTANT_SLOTS + FLOW_SITES + 4);
     expect(FLOW_BYTES).toBe(FLOW_SLOTS * 16);
     expect(packFlow(settings, sites).byteLength).toBe(FLOW_BYTES);
     expect(FLOW_ITERATIONS).toBe(16);
@@ -198,6 +245,20 @@ describe('packFlow', () => {
     near(18, FLOW.birth);
     near(19, FLOW.birthFrom);
     near(24, FLOW_HOLD);
+    // The last lane of the slot g: 0 with 4 neighbours, so a block of before has its bytes (ADR 0086).
+    expect(f[27]).toBe(0);
+  });
+
+  it('writes the base conductance of the settings, and 1 in the last lane of g with 8 neighbours (ADR 0086)', () => {
+    const f = new Float32Array(packFlow({ ...settings, flowBase: 0.002, flowEdges: 8 }, sites));
+    expect(f[4]).toBe(Math.fround(0.002));
+    expect(f[27]).toBe(1);
+    // Every other value is that of the default block.
+    const d = new Float32Array(packFlow(settings, sites));
+    expect(d[4]).toBe(Math.fround(FLOW.base));
+    f.forEach((v, i) => {
+      if (i !== 4 && i !== 27) expect(v, `value ${String(i)}`).toBe(d[i]);
+    });
   });
 
   it('sets the pressure limit of a site by its flux', () => {
@@ -277,6 +338,61 @@ describe('packFlow', () => {
     const none = new Float32Array(packFlow(settings, NO_SITES, buf));
     expect(none[15]).toBe(0);
     expect(none.subarray(28).every((v) => v === 0)).toBe(true);
+  });
+});
+
+// ADR 0055, decision 5: the setting Slime life time gives the mark of starved ground its time.
+describe('the time of the mark of starved ground (ADR 0055)', () => {
+  const settings = { ...defaultSettings(), flowStrength: 6, seed: 77 };
+  /** The share that the passes get: the fourth value of the uniform block (flow.wgsl U.a.w). */
+  const packed = (slimeLife: number) => new Float32Array(packFlow({ ...settings, slimeLife }, NO_SITES))[3];
+  /** Hours of model time from the floor of the flow memory up to `level`, at the share of a life time. */
+  const hours = (slimeLife: number, level: number) =>
+    Math.log(level / FLOW.floor) / Math.log(1 + recoverShare({ slimeLife })) / STEPS_PER_MINUTE / 60;
+
+  it('keeps the share of ADR 0054 at the default of 144 hours, bit for bit', () => {
+    expect(defaultSettings().slimeLife).toBe(144);
+    expect(recoverShare({ slimeLife: 144 })).toBe(FLOW.recover);
+    expect(recoverShare(defaultSettings())).toBe(0.00002875);
+    expect(packed(144)).toBe(Math.fround(FLOW.recover));
+    // Every byte of the uniform block is the one of the code before, which packed FLOW.recover.
+    const block = new Float32Array(packFlow(settings, NO_SITES));
+    const before = block.slice();
+    before[3] = FLOW.recover;
+    expect(new Uint8Array(block.buffer)).toEqual(new Uint8Array(before.buffer));
+  });
+
+  it('gives the share of ADR 0029 at 18 hours: eight times the share of 144 hours', () => {
+    expect(recoverShare({ slimeLife: 18 })).toBe(0.00023);
+    expect(recoverShare({ slimeLife: 18 })).toBe(FLOW.recover * 8);
+    expect(packed(18)).toBe(Math.fround(0.00023));
+  });
+
+  it('keeps the share of ADR 0054 without slime, at a life time of 0', () => {
+    expect(recoverShare({ slimeLife: 0 })).toBe(FLOW.recover);
+    expect(packed(0)).toBe(Math.fround(FLOW.recover));
+    expect(packed(0)).toBe(packed(144));
+  });
+
+  it('lets the mark fade in about the life time, and opens the ground for births after about six tenths of it', () => {
+    for (const slimeLife of [1, 18, 72, 144, 240]) {
+      // From the floor to fresh ground, and to the level from which a child is born onto the ground.
+      expect(hours(slimeLife, FLOW.fresh) / slimeLife, `${slimeLife} h`).toBeCloseTo(1.02, 2);
+      expect(hours(slimeLife, FLOW.half) / slimeLife, `${slimeLife} h`).toBeCloseTo(0.618, 2);
+    }
+    // 6 days and 3.7 days at the default, as the help of the setting says.
+    expect(hours(144, FLOW.fresh) / 24).toBeCloseTo(6.12, 2);
+    expect(hours(144, FLOW.half) / 24).toBeCloseTo(3.71, 2);
+    // A shorter life time gives a larger share, in the inverse ratio.
+    expect(recoverShare({ slimeLife: 72 })).toBe(2 * FLOW.recover);
+    expect(recoverShare({ slimeLife: 240 })).toBeCloseTo(0.6 * FLOW.recover, 15);
+    expect(recoverShare({ slimeLife: 240 })).toBeLessThan(recoverShare({ slimeLife: 144 }));
+  });
+
+  it('changes no other value of the uniform block', () => {
+    const [a, b] = [144, 18].map((slimeLife) => new Float32Array(packFlow({ ...settings, slimeLife }, NO_SITES)));
+    const differing = [...(a ?? [])].flatMap((v, i) => (v === b?.[i] ? [] : [i]));
+    expect(differing).toEqual([3]);
   });
 });
 

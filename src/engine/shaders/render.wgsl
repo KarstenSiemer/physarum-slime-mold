@@ -5,6 +5,10 @@
 override ENV: bool = true;
 // The scent view (ADR 0009, amendment 2026-11-11), compiled in only while it is on (render.ts).
 override SCENT: bool = false;
+// The film of the slime (ADR 0055, decision 8; ADR 0057), compiled in only while a frame draws it (render.ts).
+override SLIME: bool = false;
+// The skirt of the growth front (ADR 0060), compiled in only while a frame draws it, together with SLIME (render.ts).
+override FRONT: bool = false;
 
 struct View {
   canvas: vec2f,      // canvas size, pixels
@@ -20,10 +24,17 @@ struct View {
   // The stream of the plasm: drawn (1) or not (0), the phases of its pattern and its swing. w is not of the stream:
   // 1 while an electrode may be painted (ADR 0047).
   streamFx: vec4f,
-  gelFx: vec4f,       // gel style: the white in the colour of the thinnest gel, the ground that it hides, 2 unused
+  // gel style: the white in the colour of the thinnest gel, the ground that it hides; z: 1 while the picture draws
+  // the veins (ADR 0099), in every style that draws the trail; w unused
+  gelFx: vec4f,
   scentFx: vec4f,     // scent view: map level (0 to 3), unused, unused, unused
   scentHalf: vec4f,   // scent view: half the spread of the sensors of up to 4 strains (0: none), cells
   scentHolds: vec4f,  // scent view: the hold of a strand of each, as a difference of food scent (scentSensors())
+  // The slime: the steps that ran so far, the life time of the slime in steps, what the frame draws (1 the film of
+  // the slime, 2 the skirt of the growth front), unused.
+  slime: vec4u,
+  slimeFx: vec4f,     // the slime: the colour of its body, linear RGB, and how much of it full slime shows
+  slimeLight: vec4f,  // the slime: its highlight, its wide light, the height of its relief, the height of its beads
 }
 
 // The dish's diameter as a share of the grid's short side (DISH_FILL in common.wgsl, ADR 0027).
@@ -40,7 +51,17 @@ const DISH_FILL = 0.945;
 @group(0) @binding(8) var<storage, read> occ: array<u32>; // agents per cell, kept in collision mode only
 @group(0) @binding(11) var trailLevels: texture_2d<f32>; // the trail on a coarser map (trailDown), zoomed out
 @group(0) @binding(12) var stream: texture_2d<f32>; // the direction of the flow of the plasm times its speed
-@group(0) @binding(13) var<storage, read> env: array<u32>; // the cells of the simulation; read for the electrodes only
+// The fourth root of the strength across the tube of each cell and strain (`roots` in tubes.wgsl); read for the veins
+// only (V.gelFx.z, ADR 0099).
+@group(0) @binding(13) var veins: texture_2d<f32>;
+@group(0) @binding(14) var<storage, read> stamps: array<u32>; // the stamps of the slime field (slime.wgsl); read by `slimeFilm` only
+@group(0) @binding(18) var<storage, read> amounts: array<u32>; // the amounts of slime (amount.wgsl); read by `slimeFilm` only
+@group(0) @binding(15) var film: texture_2d<f32>; // the film of the slime, one texel per cell (written by `slimeFilm`)
+@group(0) @binding(17) var filmLevels: texture_2d<f32>; // the film on a coarser map (slimeDown), zoomed out
+@group(0) @binding(19) var<storage, read> fronts: array<u32>; // the front field (slime.wgsl); read by `frontMap` only
+@group(0) @binding(20) var youngMap: texture_2d<f32>; // the map of the growth front (written by `frontMap`)
+// The outline distances of the electrodes (paint.wgsl POLES, ADR 0058); read for the electrodes only.
+@group(0) @binding(16) var<storage, read> poles: array<u32>;
 @group(0) @binding(9) var scent: texture_2d<f32>; // food scent (r) and light repellent (g); read by the scent view only
 @group(0) @binding(10) var scentLevels: texture_2d<f32>; // the scent on a coarser map (scentDown), zoomed out
 
@@ -204,6 +225,81 @@ fn tint(v: vec4f) -> vec3f {
   return c;
 }
 
+// ---- The veins (ADR 0099) ----------------------------------------------------------------------------------------
+// While the picture of the tubes shows, a vein of the model has a deeper and darker shade of the colour of its strain
+// than the sheet around it, and in the gel style it is a low ridge, as the prototype draws it (research/front/
+// picture.ts look()). The strength of a vein is the square root of the strength across its tube (tubes.ts, point 2),
+// as the prototype takes the square root of the strength of a cell. Display only.
+const VEIN_DEEP = 0.8;  // how far a whole vein goes from the colour of its strain to the deep shade
+const VEIN_DARK = 0.8;  // the deep shade: the colour of the strain squared, which is more saturated, times this
+const VEIN_LOW = 0.2;   // the strength of a vein at which the shade begins
+const VEIN_HIGH = 0.7;  // and at which it is whole
+const VEIN_RISE = 1.0;  // gel style: the height of the ridge of a whole vein, in cells
+
+struct Veins {
+  deep: vec4f,  // per strain: how far the colour goes to the deep shade, 0 to VEIN_DEEP
+  slope: vec2f, // the slope of the ridge, per cell: the gradient of the sum of `deep`
+}
+
+// The strength across the tube of cell c (tubes.ts, point 2), per strain: 0 outside the arena.
+fn veinCell(c: vec2i) -> vec4f {
+  let q = cellXY(c);
+  if (q.x < 0) { return vec4f(0.0); }
+  let r = textureLoad(veins, q, 0);
+  let a = r * r;
+  return a * a;
+}
+
+// The veins at p: the strength across the tube as a quadratic B-spline over the 3 × 3 cells around p (spline()), so
+// that a vein has no tooth at the edge of a cell, and its gradient from the same cells.
+fn veinsAt(p: vec2f) -> Veins {
+  let q = p - 0.5;
+  let c = vec2i(floor(q + 0.5));
+  let u = q - vec2f(c);
+  let wx = spline(u.x);
+  let wy = spline(u.y);
+  let sx = splineSlope(u.x);
+  let sy = splineSlope(u.y);
+  var sum = vec4f(0.0);
+  var gx = vec4f(0.0);
+  var gy = vec4f(0.0);
+  for (var j = 0; j < 3; j++) {
+    var row = vec4f(0.0);
+    var rowSlope = vec4f(0.0);
+    for (var i = 0; i < 3; i++) {
+      let a = veinCell(c + vec2i(i - 1, j - 1));
+      row += wx[i] * a;
+      rowSlope += sx[i] * a;
+    }
+    sum += wy[j] * row;
+    gx += wy[j] * rowSlope;
+    gy += sy[j] * row;
+  }
+  let v = sqrt(sum);
+  let t = clamp((v - VEIN_LOW) / (VEIN_HIGH - VEIN_LOW), vec4f(0.0), vec4f(1.0));
+  var r: Veins;
+  r.deep = VEIN_DEEP * t * t * (3.0 - 2.0 * t);
+  // d deep / d sum: the slope of the smoothstep times that of the square root.
+  // Below VEIN_LOW t is 0, and so is the slope.
+  let k = VEIN_DEEP * 6.0 * t * (1.0 - t) / ((VEIN_HIGH - VEIN_LOW) * 2.0 * max(v, vec4f(1e-30)));
+  r.slope = vec2f(dot(k, gx), dot(k, gy));
+  return r;
+}
+
+// The colour of strain s where its colour goes `deep` of the way to the deep shade.
+fn shade(s: u32, deep: f32) -> vec3f {
+  let c = V.colors[s].rgb;
+  if (deep <= 0.0) { return c; }
+  return mix(c, VEIN_DARK * c * c, deep);
+}
+
+// tint() with the veins: each strain in its shade (`deep`: Veins.deep).
+fn veined(v: vec4f, deep: vec4f) -> vec3f {
+  var c = vec3f(0.0);
+  for (var s = 0u; s < V.frame.y; s++) { c += v[s] * shade(s, deep[s]); }
+  return c;
+}
+
 fn srgb(c: vec3f) -> vec3f {
   return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, 12.92 * c, c <= vec3f(0.0031308));
 }
@@ -223,17 +319,18 @@ fn cover(sd: f32) -> f32 {
 
 // Linear light per strain, then a per-channel exponential tone curve: dense overlaps turn white-hot.
 // `base` is what lies below the trail: the background, or food on it.
-fn glow(v: vec4f, halo: vec4f, base: vec3f) -> vec3f {
+// `vein`: the share of the deep shade of each strain (Veins.deep), 0 without the veins.
+fn glow(v: vec4f, halo: vec4f, base: vec3f, vein: vec4f) -> vec3f {
   // The bloom chain sums 5 blur levels (bloom.ts); divide to keep the strength scale intuitive.
-  let l = 1.0 - exp(-(tint(v) * V.exposure + tint(halo) * V.fx.x * 0.2));
+  let l = 1.0 - exp(-(veined(v, vein) * V.exposure + tint(halo) * V.fx.x * 0.2));
   return base + (1.0 - base) * l;
 }
 
 // Ink on paper: each strain absorbs the complement of its color (Beer–Lambert).
-fn paper(v: vec4f, base: vec3f) -> vec3f {
+fn paper(v: vec4f, base: vec3f, vein: vec4f) -> vec3f {
   var absorb = vec3f(0.0);
   for (var s = 0u; s < V.frame.y; s++) {
-    absorb += v[s] * (0.15 + 0.85 * (1.0 - V.colors[s].rgb));
+    absorb += v[s] * (0.15 + 0.85 * (1.0 - shade(s, vein[s])));
   }
   return base * exp(-absorb * V.exposure);
 }
@@ -299,9 +396,27 @@ fn heightAt(q: vec2f) -> f32 {
   return textureSampleLevel(heights, heightSampler, (p + 1.0) / (s + 2.0), 0.0).r;
 }
 
-// Four taps spread over the pixel footprint when zoomed out, against aliasing.
+// The height field at q as a quadratic B-spline over the 3 × 3 cells around q, the spline of food and walls
+// (envAt()), from four bilinear lookups: each reads two of the three cells along an axis, and the middle cell gives
+// half of its weight to each. The spline has no crease at the edge of a cell. With one bilinear lookup the line at
+// which the gel ends had a tooth for each cell.
+fn heightSmooth(q: vec2f) -> f32 {
+  let c = floor(q);
+  let u = q - c - 0.5;
+  let w0 = 0.5 * (0.5 - u) * (0.5 - u);
+  let w1 = 0.75 - u * u;
+  let w2 = 0.5 * (0.5 + u) * (0.5 + u);
+  let a = w0 + 0.5 * w1; // the weight of the lookup between the cell before and the middle cell
+  let b = 0.5 * w1 + w2; // and of the one between the middle cell and the cell after
+  let lo = c - 0.5 + 0.5 * w1 / a;
+  let hi = c + 0.5 + w2 / b;
+  return a.x * a.y * heightAt(lo) + b.x * a.y * heightAt(vec2f(hi.x, lo.y)) +
+         a.x * b.y * heightAt(vec2f(lo.x, hi.y)) + b.x * b.y * heightAt(hi);
+}
+
+// Zoomed in, the height as a smooth surface. Zoomed out, four taps spread over the pixel footprint, against aliasing.
 fn heightFiltered(p: vec2f) -> f32 {
-  if (V.scale <= 1.0) { return heightAt(p); }
+  if (V.scale <= 1.0) { return heightSmooth(p); }
   let o = 0.25 * V.scale;
   return 0.25 * (heightAt(p + vec2f(-o, -o)) + heightAt(p + vec2f(o, -o)) +
                  heightAt(p + vec2f(-o, o)) + heightAt(p + vec2f(o, o)));
@@ -317,7 +432,7 @@ fn thick(y: f32) -> f32 {
 // one, has the full colour of its strain and hides the ground. Thin gel is pale and clear, as much as the setting of
 // the gel colour says (V.gelFx, GEL_FX in render.ts). The gel is clear enough to
 // show a flake of food below it (`f`, see flakeAt): over food its colour takes in the flake's, grain and outline.
-fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
+fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake, vein: Veins) -> vec3f {
   // The slope of the thickness from 8 lookups around p, 2 on each side: their mean smooths the cells.
   let a = 1.25 * max(V.scale, 1.0);
   let b = 0.5 * max(V.scale, 1.0);
@@ -326,7 +441,8 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   let south = vec2f(thick(heightFiltered(p + vec2f(b, a))), thick(heightFiltered(p + vec2f(-b, a))));
   let north = vec2f(thick(heightFiltered(p + vec2f(b, -a))), thick(heightFiltered(p + vec2f(-b, -a))));
   let rise = vec2f(east.x + east.y - west.x - west.y, south.x + south.y - north.x - north.y) / (4.0 * a);
-  let n = normalize(vec3f(-GEL_HIGH * rise, 1.0));
+  // A vein is a low ridge on the gel (ADR 0099).
+  let n = normalize(vec3f(-GEL_HIGH * rise - VEIN_RISE * vein.slope, 1.0));
   let l = normalize(vec3f(-0.45, -0.6, 0.65));
   // Light goes a little way through the gel, so the side away from the light is not black.
   let diffuse = clamp((dot(n, l) + 0.35) / 1.35, 0.0, 1.0);
@@ -334,7 +450,7 @@ fn gel(p: vec2f, v: vec4f, base: vec3f, f: Flake) -> vec3f {
   let shine = max(dot(n, normalize(l + vec3f(0.0, 0.0, 1.0))), 0.0);
   let spec = 0.9 * pow(shine, 120.0) + 0.1 * pow(shine, 14.0);
   let total = v.x + v.y + v.z + v.w;
-  var albedo = select(V.colors[0].rgb, tint(v) / max(total, 1e-6), total > 1e-6);
+  var albedo = select(V.colors[0].rgb, veined(v, vein.deep) / max(total, 1e-6), total > 1e-6);
   if (ENV && f.cover > 0.0) { albedo = mix(albedo, mix(f.body, f.edge, f.rim * 0.85), GEL_CLEAR * f.cover); }
   let here = heightFiltered(p);
   // The thickness of the tube that p is a part of: the largest around p, so a tube has one colour up to its rim.
@@ -438,20 +554,20 @@ fn shapeIndex(c: vec2i) -> i32 {
   return q.y * s.x + q.x;
 }
 
-// The 3 × 3 cells of `shape` around cell c, row by row: the cells the spline reads at a point in c. As
-// shapeIndex(), but the columns and rows are wrapped or clamped once.
-fn shapeCells(c: vec2i) -> array<u32, 9> {
+// The 3 × 3 cells around cell c, row by row, each as shapeIndex() gives it: the cells the spline reads at a point in
+// c. The columns and rows are wrapped or clamped once.
+fn cellsAround(c: vec2i) -> array<i32, 9> {
   let s = size();
-  var w: array<u32, 9>;
+  var k: array<i32, 9>;
   if (V.boundary == 2u) {
     let m = vec2f(c) + 0.5 - 0.5 * vec2f(s);
     let rim = DISH_FILL * 0.5 * f32(min(s.x, s.y));
     if (dot(m, m) > (rim - 1.5) * (rim - 1.5)) {
       // Near the rim: some of the 3 × 3 cells may lie outside the dish.
       for (var j = 0; j < 3; j++) {
-        for (var i = 0; i < 3; i++) { w[j * 3 + i] = shape[shapeIndex(c + vec2i(i - 1, j - 1))]; }
+        for (var i = 0; i < 3; i++) { k[j * 3 + i] = shapeIndex(c + vec2i(i - 1, j - 1)); }
       }
-      return w;
+      return k;
     }
   }
   var xs = clamp(vec3i(c.x - 1, c.x, c.x + 1), vec3i(0), vec3i(s.x - 1));
@@ -462,8 +578,16 @@ fn shapeCells(c: vec2i) -> array<u32, 9> {
     ys = vec3i(select(q.y - 1, s.y - 1, q.y == 0), q.y, select(q.y + 1, 0, q.y == s.y - 1));
   }
   for (var j = 0; j < 3; j++) {
-    for (var i = 0; i < 3; i++) { w[j * 3 + i] = shape[ys[j] * s.x + xs[i]]; }
+    for (var i = 0; i < 3; i++) { k[j * 3 + i] = ys[j] * s.x + xs[i]; }
   }
+  return k;
+}
+
+// The 3 × 3 cells of `shape` around cell c (cellsAround()).
+fn shapeCells(c: vec2i) -> array<u32, 9> {
+  let k = cellsAround(c);
+  var w: array<u32, 9>;
+  for (var i = 0; i < 9; i++) { w[i] = shape[k[i]]; }
   return w;
 }
 
@@ -630,9 +754,8 @@ fn flakeAt(p: vec2f, e: Env) -> Flake {
   return f;
 }
 
-// What lies below the trail: the background, or the flake on it. The trail and the agents lie on top.
-fn substrate(f: Flake) -> vec3f {
-  let bg = V.background.rgb;
+// What lies below the trail: the ground `bg`, or the flake on it. The trail and the agents lie on top.
+fn substrate(f: Flake, bg: vec3f) -> vec3f {
   if (f.cover <= 0.0) { return bg; }
   return mix(mix(bg, f.body, f.cover * 0.95), f.edge, f.cover * f.rim * 0.85);
 }
@@ -710,6 +833,429 @@ fn wallBeside(p: vec2f, cells: array<u32, 9>) -> bool {
   return wall != 0u;
 }
 
+// ---- The slime (SLIME) --------------------------------------------------------------------------------
+// The slime of the model as a wet film on the ground (ADR 0055, decision 8; ADR 0057). The film is thick where a tube
+// stayed and thin where the colony only passed, so it keeps the shape of the tube that made it. The flake of food,
+// the trail, the light, the walls and the electrodes lie on it. Display only. src/engine/slime-reference.ts holds the
+// same rules (filmCells(), filmAt(), slimeColour()), and SLIME_LOOK in render.ts the numbers of each style.
+//
+// Three steps. `slimeFilm` writes the thickness of the film of every cell into a map, once for each state of the
+// simulation. `slimeDown` writes the mean of that map over 2^k cells per side for a view that is zoomed out. The
+// render pass reads the 3 × 3 texels of its map around a pixel as a smooth surface, and lights it.
+
+const SLIME_FULL = 4095.0;  // the full amount of slime of a cell (slime.ts SLIME_FULL)
+const SLIME_WAVES = 12.0;   // cells per step of the lattice of the waves of the film
+const SLIME_BEADS = 7.0;    // cells per step of the lattice of the beads
+const SLIME_RIPPLE = 0.16;  // how much the waves change the thickness of the film, as a share of it
+
+// The strength of the slime of a cell that holds the stamp `held`, 0 to 1. The age of a stamp is the steps that ran so
+// far plus 1 less the stamp, in unsigned integers as in the passes of the simulation (slime.wgsl). The strength is 1 at
+// the age 0 and falls in a straight line to 0 at the life time. It is 0 without a stamp.
+fn slimeOf(held: u32) -> f32 {
+  let age = V.slime.x + 1u - held;
+  if (held == 0u || age >= V.slime.y) { return 0.0; }
+  return 1.0 - f32(age) / f32(V.slime.y);
+}
+
+// Whether grid cell c lies in the arena. A cell outside it never holds slime.
+fn slimeArena(c: vec2i) -> bool {
+  if (V.boundary == 0u) { return true; }
+  let s = size();
+  if (any(c < vec2i(0)) || any(c >= s)) { return false; }
+  return V.boundary != 2u || distance(vec2f(c) + 0.5, 0.5 * vec2f(s)) <= DISH_FILL * 0.5 * f32(min(s.x, s.y));
+}
+
+// The thickness of the slime of the cell with the index i, 0 to 1: its amount as a share of the full amount, times the
+// strength of the age of its stamp.
+fn filmCell(i: i32) -> f32 {
+  return slimeOf(stamps[i]) * f32(amounts[i]) / SLIME_FULL;
+}
+
+// The film of cell c, which may hold a wall or lie outside the arena: the mean of the thickness of the open cells among
+// the 3 × 3 around it, with the weights 1, 2, 1 along each axis. A cell is open when it lies in the arena and holds no
+// wall that the picture draws. So a wall and a cell outside the arena take the film of the open cells beside them, and
+// the film goes on up to a wall and to the rim of the dish, which are drawn over it. Without the mean the film had a
+// tooth for each cell along a slanted wall: the cells beside a wall hold less trail than their neighbours.
+//
+// A cell with no open cell among its 3 × 3 takes the mean over the 5 × 5 in the same way, with the weights 1, 2, 3, 2,
+// 1: the smooth outline of a wall runs through the cells of the wall, and a pixel beside it reads the cells two deep
+// (besideWall() does the same for the gel). 0 without an open cell among the 5 × 5.
+fn filmOf(c: vec2i) -> f32 {
+  let s = size();
+  let walls = ENV && V.frame.z != 0u;
+  for (var r = 1; r <= 2; r++) {
+    var sum = 0.0;
+    var total = 0.0;
+    for (var j = -r; j <= r; j++) {
+      for (var i = -r; i <= r; i++) {
+        var k = c + vec2i(i, j);
+        if (V.boundary == 0u) { k = wrapCell(k, s); }
+        if (!slimeArena(k)) { continue; }
+        let at = k.y * s.x + k.x;
+        if (walls && (shape[at] & 0x80u) != 0u) { continue; }
+        let w = f32((r + 1 - abs(i)) * (r + 1 - abs(j)));
+        sum += w * filmCell(at);
+        total += w;
+      }
+    }
+    if (total > 0.0) { return sum / total; }
+  }
+  return 0.0;
+}
+
+// The map of the film, one texel per cell and one fragment per texel (render.ts fills it once for each state that a
+// frame draws).
+@fragment
+fn slimeFilm(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+  return vec4f(filmOf(vec2i(floor(frag.xy))), 0.0, 0.0, 1.0);
+}
+
+// The film on the coarse map of level V.fx.w (1 and up), one texel per fragment: the mean over the cells that the texel
+// covers, each by the share it covers, as trailDown has it for the trail. A cell outside the arena that no open cell
+// touches holds no film.
+@fragment
+fn slimeDown(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+  let s = size();
+  let span = vec2f(s) / vec2f(levelSize(u32(V.fx.w))); // cells per texel
+  let lo = floor(frag.xy) * span;
+  let hi = lo + span;
+  var sum = 0.0;
+  for (var y = i32(floor(lo.y)); f32(y) < hi.y && y < s.y; y++) {
+    let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
+    for (var x = i32(floor(lo.x)); f32(x) < hi.x && x < s.x; x++) {
+      let w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy;
+      sum += w * textureLoad(film, vec2i(x, y), 0).r;
+    }
+  }
+  return vec4f(sum / (span.x * span.y), 0.0, 0.0, 1.0);
+}
+
+struct Film {
+  h: f32,   // the thickness of the film at a point, 0 to 1
+  g: vec2f, // its gradient, per cell
+}
+
+// The film at p: a quadratic B-spline over the 3 × 3 texels around p of the map of level V.fx.w (0 the map of the
+// cells, up to 2 cells per pixel; above, the coarse map whose texels are 1/2 to 1 pixel wide), with its gradient from
+// the same texels (envAt() has the weights). The spline has no crease, so the light on the film has no seam at the
+// edge of a cell. The texels are fixed in the grid, so the film does not shimmer when the view moves. On the periodic
+// grid the map wraps; in a closed arena the texels at its edge go on beyond it.
+fn filmAt(p: vec2f) -> Film {
+  let k = u32(V.fx.w);
+  let s = size();
+  var n = s;
+  if (k > 0u) { n = levelSize(k); }
+  let ratio = vec2f(n) / vec2f(s); // texels per cell
+  let q = p * ratio - 0.5;
+  let c = vec2i(floor(q + 0.5));
+  let u = q - vec2f(c);
+  let wx = spline(u.x);
+  let wy = spline(u.y);
+  let sx = splineSlope(u.x);
+  let sy = splineSlope(u.y);
+  var xs = clamp(vec3i(c.x - 1, c.x, c.x + 1), vec3i(0), vec3i(n.x - 1));
+  var ys = clamp(vec3i(c.y - 1, c.y, c.y + 1), vec3i(0), vec3i(n.y - 1));
+  if (V.boundary == 0u) {
+    // One wrap for the 3 × 3 texels, as in shapeCells().
+    let w = wrapCell(c, n);
+    xs = vec3i(select(w.x - 1, n.x - 1, w.x == 0), w.x, select(w.x + 1, 0, w.x == n.x - 1));
+    ys = vec3i(select(w.y - 1, n.y - 1, w.y == 0), w.y, select(w.y + 1, 0, w.y == n.y - 1));
+  }
+  var f: Film;
+  for (var j = 0; j < 3; j++) {
+    for (var i = 0; i < 3; i++) {
+      var h: f32;
+      if (k == 0u) {
+        h = textureLoad(film, vec2i(xs[i], ys[j]), 0).r;
+      } else {
+        h = textureLoad(filmLevels, vec2i(xs[i], ys[j]), 0).r;
+      }
+      f.h += wx[i] * wy[j] * h;
+      f.g += vec2f(sx[i] * wy[j], wx[i] * sy[j]) * h;
+    }
+  }
+  f.g *= ratio;
+  return f;
+}
+
+// The steps of the lattice of a pattern along each side of the grid, about one per `step` cells: whole numbers, so
+// the pattern repeats with a periodic grid and shows no seam at its edge. The side over `step`, rounded to the nearest
+// whole number, and up for a side half way between two. In whole numbers: `round` takes the even number at a half in
+// WGSL and either one in GLSL, so the two backends drew other waves on a grid of 30 cells.
+fn patternSteps(step: f32) -> vec2f {
+  let n = i32(step);
+  return vec2f(max((2 * size() + n) / (2 * n), vec2i(1)));
+}
+
+// Value noise that repeats every `period` lattice steps, with its gradient: (the value, 0 to 1; its change per
+// lattice step along x and along y). The curve between two lattice points starts and ends flat in its slope and in
+// its bend, so the gradient has no crease.
+fn noiseSlope(x: vec2f, period: vec2i) -> vec3f {
+  let i = vec2i(floor(x));
+  let f = x - floor(x);
+  let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  let du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  let i0 = wrapCell(i, period);
+  let i1 = wrapCell(i + 1, period);
+  let a = lattice(i0);
+  let b = lattice(vec2i(i1.x, i0.y));
+  let c = lattice(vec2i(i0.x, i1.y));
+  let d = lattice(i1);
+  let k1 = b - a;
+  let k2 = c - a;
+  let k3 = a - b - c + d;
+  return vec3f(a + k1 * u.x + k2 * u.y + k3 * u.x * u.y, du.x * (k1 + k3 * u.y), du.y * (k2 + k3 * u.x));
+}
+
+// The waves of the film, a pattern that is fixed in the grid: wide soft noise, and a quarter of a noise of twice the
+// frequency. (the value, 0 to 1; its gradient per cell).
+fn slimeWaves(p: vec2f) -> vec3f {
+  let n = patternSteps(SLIME_WAVES);
+  let scale = n / vec2f(size()); // lattice steps per cell
+  let x = p * scale;
+  let a = noiseSlope(x, vec2i(n));
+  let b = noiseSlope(2.0 * x + vec2f(19.7, 7.3), 2 * vec2i(n));
+  return vec3f((a.x + 0.25 * b.x) / 1.25, (a.yz + 0.5 * b.yz) * scale / 1.25);
+}
+
+// The beads on the film: small round drops at places that are fixed in the grid, one for about four steps of their
+// lattice. (the height of the bead at p, 0 to 1; its gradient per cell). 0 where no bead lies.
+fn slimeBeads(p: vec2f) -> vec3f {
+  let n = patternSteps(SLIME_BEADS);
+  let scale = n / vec2f(size()); // lattice steps per cell
+  let x = p * scale;
+  let i = vec2i(floor(x));
+  var best = vec3f(0.0);
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let k = i + vec2i(dx, dy);
+      let w = wrapCell(k, vec2i(n));
+      if (lattice(w + vec2i(7, 211)) > 0.25) { continue; }
+      // The place of the bead in its step of the lattice, and its radius: 0.1 to 0.32 steps.
+      let o = vec2f(lattice(w), lattice(w + vec2i(57, 113)));
+      let r = 0.1 + 0.22 * lattice(w + vec2i(191, 31));
+      let d = x - (vec2f(k) + o);
+      let m = 1.0 - dot(d, d) / (r * r);
+      if (m > best.x) { best = vec3f(m, -2.0 * d * scale / (r * r)); }
+    }
+  }
+  if (best.x <= 0.0) { return vec3f(0.0); }
+  return vec3f(best.x * best.x, 2.0 * best.x * best.yz);
+}
+
+// The light of the lamp on a wet surface with the normal n, less what a flat film shows: (a small bright highlight; a
+// wide weak light, below 0 on a slope that faces away from the lamp).
+fn wetShine(n: vec3f) -> vec2f {
+  let half = normalize(SUN + vec3f(0.0, 0.0, 1.0));
+  let shine = max(dot(n, half), 0.0);
+  return vec2f(pow(shine, 110.0), pow(shine, 10.0) - pow(half.z, 10.0));
+}
+
+// The ground `bg` at p with the film of the slime on it. Thin slime is clear and thick slime is milky, so the body of
+// the film shows where a tube stayed. The surface is the film with its waves: the lamp of the walls and the gel puts
+// a small highlight and a wide weak light on it. Beads sit on thick slime and only catch the light. On paper the film
+// is a wet stain: it mixes its colour into the paper, it is darker on the side away from the lamp, and its edge has a
+// tide line. Detail that is smaller than a pixel fades out from 1 cell per pixel on, and is gone at 1.5.
+fn slimed(bg: vec3f, p: vec2f) -> vec3f {
+  let f = filmAt(p);
+  if (f.h <= 0.0) { return bg; }
+  let fine = clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
+  let cov = smoothstep(0.0, 0.05, f.h);
+  let waves = slimeWaves(p);
+  let wave = 1.0 + SLIME_RIPPLE * (2.0 * waves.x - 1.0);
+  let h = f.h * wave;
+  let g = f.g * wave + f.h * SLIME_RIPPLE * 2.0 * waves.yz * fine;
+  let shine = wetShine(normalize(vec3f(-V.slimeLight.z * g, 1.0)));
+  var spark = shine.x;
+  let bead = V.slimeLight.w * fine * smoothstep(0.15, 0.45, f.h);
+  if (bead > 0.0) {
+    let beads = slimeBeads(p);
+    let glint = wetShine(normalize(vec3f(-V.slimeLight.z * (g + bead * beads.yz), 1.0)));
+    spark = max(shine.x, glint.x) + 0.25 * max(glint.y - shine.y, 0.0);
+  }
+  let depth = pow(clamp(h, 0.0, 1.0), 1.6);
+  if (V.style == 2u) {
+    let edge = smoothstep(0.0, 0.04, f.h) * (1.0 - smoothstep(0.05, 0.2, f.h));
+    let stain = mix(bg, V.slimeFx.rgb, V.slimeFx.a * depth) *
+                (1.0 - 0.04 * edge + V.slimeLight.y * cov * clamp(shine.y, -0.4, 0.1));
+    return mix(stain, vec3f(1.0), min(V.slimeLight.x * spark * cov, 1.0));
+  }
+  let wide = V.slimeLight.y * cov * clamp(shine.y, -0.15, 0.5);
+  return max(bg + V.slimeFx.rgb * (V.slimeFx.a * depth + wide), vec3f(0.0)) +
+         vec3f(min(V.slimeLight.x * spark * cov, 0.8));
+}
+
+
+// ---- The growth front (ADR 0060) --------------------------------------------------------------------------------
+// Display only. The front field holds the step at which plasm first came onto each cell (slime.wgsl `front`). The
+// picture draws a skirt around young ground: a thin clear veil of slime on the ground, below the plasm. It shows
+// where a tube grows now. The model grows the tube; the skirt adds no plasm to the picture.
+//
+// Two steps. `frontMap` writes a coarse map, once for each state of the simulation: how much of each texel is young
+// ground. The render pass takes the young ground around a pixel from the texels in reach, as a round and smooth hill,
+// and draws the skirt where that hill is high enough.
+//
+// The skirt moves without a jump. A cell counts by its own age: its share comes in SKIRT_RISE steps and goes in
+// SKIRT_STEPS steps, so one cell changes the skirt by a small amount in a step. And the skirt depends on the stamps
+// alone, not on the levels of the picture, which move in steps.
+
+const FRONT_LEVEL = 2u;     // the map of the front has texels of 2^2 = 4 cells per side
+const SKIRT_STEPS = 150.0;  // steps in which the skirt of a cell goes, by the factor e (5 min)
+const SKIRT_RISE = 8.0;     // steps in which the skirt of a cell comes
+const SKIRT_RADIUS = 2.0;   // texels of the map from which a point takes the young ground around it
+const SKIRT_LOW = 0.04;     // the share of young ground around a point at which the skirt begins
+const SKIRT_HIGH = 0.3;     // and at which the skirt has its whole thickness
+const SKIRT_BODY = 0.09;    // the light that the whole skirt adds to the ground, and three times its share on paper
+const SKIRT_TINT = 0.5;     // how much of the colour of its strain the skirt takes; the rest is that of the slime
+const SKIRT_RELIEF = 0.35;  // the height of the relief of the skirt, as a share of that of the film of the slime
+const FRONT_REACH = 9;      // cells that the skirt reaches from its plasm, at most: SKIRT_RADIUS texels and one more
+
+// The map of the front, one fragment per texel: for each strain, the share of the texel that is young ground of the
+// strain. A cell is young ground while it has slime and a front stamp. With the age a of the stamp in steps it counts
+// (1 − e^(−a / SKIRT_RISE)) · e^(−a / SKIRT_STEPS): nothing at the step of the stamp, most after about 25 steps, and
+// less and less after that. Its strain is the one with the most trail in it. A cell with slime and no front stamp is
+// old ground (painted slime).
+@fragment
+fn frontMap(@builtin(position) frag: vec4f) -> @location(0) vec4f {
+  let s = size();
+  let span = vec2f(s) / vec2f(levelSize(FRONT_LEVEL)); // cells per texel
+  let lo = floor(frag.xy) * span;
+  let hi = lo + span;
+  var sum = vec4f(0.0);
+  for (var y = i32(floor(lo.y)); f32(y) < hi.y && y < s.y; y++) {
+    let wy = min(hi.y, f32(y + 1)) - max(lo.y, f32(y));
+    for (var x = i32(floor(lo.x)); f32(x) < hi.x && x < s.x; x++) {
+      let w = (min(hi.x, f32(x + 1)) - max(lo.x, f32(x))) * wy;
+      let i = y * s.x + x;
+      let held = stamps[i];
+      let f = fronts[i];
+      if (f == 0u || held == 0u || V.slime.x + 1u - held >= V.slime.y) { continue; }
+      let a = f32(V.slime.x + 1u - f);
+      let t = textureLoad(trail, vec2i(x, y), 0);
+      var k = 0u;
+      for (var j = 1u; j < V.frame.y; j++) {
+        if (t[j] > t[k]) { k = j; }
+      }
+      sum[k] += w * (1.0 - exp(-a / SKIRT_RISE)) * exp(-a / SKIRT_STEPS);
+    }
+  }
+  return sum / (span.x * span.y);
+}
+
+struct Skirt {
+  h: f32,      // the thickness of the skirt at a point, 0 to 1
+  g: vec2f,    // its gradient, per cell
+  up: vec2f,   // the slope of the young ground around the point: its plasm lies up this slope
+  tint: vec3f, // the colour of the strains of that young ground
+}
+
+// The skirt of the growth front at p. The young ground around p is the mean of the texels of the map of the front
+// within SKIRT_RADIUS texels of p, each with the weight (1 − r² / R²)³ for its distance r. The weight depends on the
+// distance alone and ends without a step, so the young ground around a texel is a round, smooth hill at any zoom: the
+// skirt shows no texel. The 4 × 4 texels around p hold every texel in reach. The skirt begins where the hill has the
+// level SKIRT_LOW and has its whole thickness from SKIRT_HIGH on.
+fn skirtAt(p: vec2f) -> Skirt {
+  var k: Skirt;
+  let s = size();
+  let n = levelSize(FRONT_LEVEL);
+  let ratio = vec2f(n) / vec2f(s); // texels per cell
+  let q = p * ratio - 0.5;
+  let c = vec2i(floor(q));
+  var weight = 0.0;
+  var slopeW = vec2f(0.0);
+  var young = vec4f(0.0);
+  var slopeY = vec2f(0.0);
+  for (var j = -1; j <= 2; j++) {
+    for (var i = -1; i <= 2; i++) {
+      let at = c + vec2i(i, j);
+      let d = q - vec2f(at);
+      let near = 1.0 - dot(d, d) / (SKIRT_RADIUS * SKIRT_RADIUS);
+      if (near <= 0.0) { continue; }
+      let w = near * near * near;
+      let dw = -6.0 * near * near * d / (SKIRT_RADIUS * SKIRT_RADIUS);
+      weight += w;
+      slopeW += dw;
+      var t = at;
+      if (V.boundary == 0u) {
+        t = wrapCell(at, n);
+      } else if (any(at < vec2i(0)) || any(at >= n)) {
+        continue;
+      }
+      let m = textureLoad(youngMap, t, 0);
+      young += w * m;
+      slopeY += dw * (m.x + m.y + m.z + m.w);
+    }
+  }
+  let total = young.x + young.y + young.z + young.w;
+  if (!(total > 1e-5 * weight)) { return k; }
+  let around = total / weight;
+  let up = (slopeY * weight - total * slopeW) / (weight * weight) * ratio;
+  let u = clamp((around - SKIRT_LOW) / (SKIRT_HIGH - SKIRT_LOW), 0.0, 1.0);
+  k.h = u * u * (3.0 - 2.0 * u);
+  k.g = 6.0 * u * (1.0 - u) / (SKIRT_HIGH - SKIRT_LOW) * up;
+  k.up = up;
+  k.tint = tint(young) / total;
+  return k;
+}
+
+// The ground `bg` at p with the skirt `k` on it: a clear veil in the colour of the slime and of its strain, as thick
+// as the skirt, with the waves of the film of the slime in its surface. The lamp puts a soft light and a small
+// highlight on it. The veil only adds light, and on paper it is a faint stain: no side of it is darker than the
+// ground, so the skirt has no dark rim.
+fn skirtOn(bg: vec3f, p: vec2f, k: Skirt) -> vec3f {
+  let fine = clamp(3.0 - 2.0 * V.scale, 0.0, 1.0);
+  let ripple = slimeWaves(p);
+  let swell = 1.0 + SLIME_RIPPLE * (2.0 * ripple.x - 1.0);
+  let h = k.h * swell;
+  let g = k.g * swell + k.h * SLIME_RIPPLE * 2.0 * ripple.yz * fine;
+  let shine = wetShine(normalize(vec3f(-SKIRT_RELIEF * V.slimeLight.z * g, 1.0)));
+  let body = mix(V.slimeFx.rgb, k.tint, SKIRT_TINT);
+  let soft = V.slimeLight.y * k.h * max(shine.y, 0.0);
+  let spark = min(V.slimeLight.x * k.h * shine.x, 0.8);
+  if (V.style == 2u) {
+    return mix(mix(bg, body, min(3.0 * SKIRT_BODY * h, 1.0)), vec3f(1.0), min(spark + 0.5 * soft, 1.0));
+  }
+  return bg + body * (SKIRT_BODY * h + soft) + vec3f(spark);
+}
+
+// How much of the skirt of the growth front shows at p, 0 to 1: nothing where a wall stands between p and the young
+// ground that the skirt comes from. A wall is thinner than the skirt is wide, and no plasm lies behind it. The young
+// ground lies up the slope `up` (Skirt.up), so the pass walks up the slope, one cell at a time, until it meets plasm
+// that the picture shows or it has gone as far as the skirt reaches. The skirt ends within one cell before the
+// outline of a wall on the way.
+fn skirtOpen(p: vec2f, up: vec2f) -> f32 {
+  let l = length(up);
+  if (l <= 1e-12) { return 1.0; }
+  let dir = up / l;
+  var open = 1.0;
+  for (var k = 0; k < FRONT_REACH; k++) {
+    let q = p + dir * f32(k) - 0.5;
+    let c = vec2i(floor(q));
+    let u = q - floor(q);
+    // The distance to the outline of the walls at the point, between the centres of the four cells around it.
+    let a = mix(wallAt(c), wallAt(c + vec2i(1, 0)), u.x);
+    let b = mix(wallAt(c + vec2i(0, 1)), wallAt(c + vec2i(1, 1)), u.x);
+    open = min(open, 1.0 - smoothstep(-1.0, 0.0, mix(a, b, u.y)));
+    if (open <= 0.0) { break; }
+    let t = trailAt(vec2i(floor(q + 0.5)));
+    if (k > 0 && (t.x + t.y + t.z + t.w - V.fx.y) * V.exposure > 0.14) { break; }
+  }
+  return open;
+}
+
+// The distance from the centre of cell c to the outline of the walls, in cells, above 0 in a wall (paint.wgsl).
+fn wallAt(c: vec2i) -> f32 {
+  return (f32(shape[shapeIndex(c)] & 0xffu) / 255.0 - 0.5) * 2.0 * SHAPE_RANGE;
+}
+
+// How much of the ground the plasm `v` hides, 0 to 1: the film of the slime does not show through a tube, in any
+// style. The plasm hides its ground from the light 0.02 on, and all of it from 0.14 on: the levels at which the gel
+// begins (see gel). So a dim tube hides the film too, and the film comes back only where the light of a tube fades
+// out at its edge.
+fn plasmCover(v: vec4f) -> f32 {
+  return smoothstep(0.02, 0.14, (v.x + v.y + v.z + v.w) * V.exposure);
+}
+
 // The arena at grid position p: the styled trail on its substrate, then light and walls on top.
 fn scene(p: vec2f, s: vec2f) -> vec3f {
   var near = false;
@@ -734,21 +1280,49 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   // A grain is more plasm: more trail in the glow and on paper, a darker gel.
   v *= 1.0 + STREAM_GAIN * grain;
   let halo = textureSampleLevel(bloom, bloomSampler, p / s, 0.0);
-  var base = V.background.rgb;
   var e: Env;
   var f: Flake;
   if (ENV && near) {
     e = envAt(p, cells);
     f = flakeAt(p, e);
-    base = substrate(f);
     if (V.frame.w != 0u) { v += presence(e, cells, raw); }
   }
+  var dots = vec4f(0.0);
+  if (V.style == 3u) { dots = agentsAt(p); }
+  var base = V.background.rgb;
+  // The film of the slime lies on the ground, the skirt of the growth front on the film, and the plasm on both
+  // (ADR 0060): where the plasm covers the ground, the picture shows nothing of them. The flake of food, the trail and
+  // all else lie on them. The agents style draws no skirt.
+  let filmy = SLIME && (V.slime.z & 1u) != 0u;
+  let skirted = FRONT && (V.slime.z & 2u) != 0u && V.style != 3u;
+  if (filmy || skirted) {
+    let hidden = plasmCover(select(v, dots, V.style == 3u));
+    if (hidden < 1.0) {
+      var under = base;
+      if (filmy) { under = slimed(under, p); }
+      if (skirted) {
+        var k = skirtAt(p);
+        // The skirt stays on the side of a wall on which its young ground lies (skirtOpen()).
+        if (ENV && V.frame.z != 0u && k.h > 0.0) {
+          let open = skirtOpen(p, k.up);
+          k.h *= open;
+          k.g *= open;
+        }
+        if (k.h > 0.0) { under = skirtOn(under, p, k); }
+      }
+      base = mix(under, base, hidden);
+    }
+  }
+  if (ENV && near) { base = substrate(f, base); }
+  // The veins, while the picture of the tubes shows (ADR 0099). The agents style draws none.
+  var vein: Veins;
+  if (V.gelFx.z != 0.0 && V.style != 3u) { vein = veinsAt(p); }
   var c: vec3f;
   switch V.style {
-    case 1u: { c = gel(p, v, base, f) * (1.0 - STREAM_DARK * grain); }
-    case 2u: { c = paper(v, base); }
-    case 3u: { c = glow(agentsAt(p), vec4f(0.0), base); }
-    default: { c = glow(v, halo, base); }
+    case 1u: { c = gel(p, v, base, f, vein) * (1.0 - STREAM_DARK * grain); }
+    case 2u: { c = paper(v, base, vein.deep); }
+    case 3u: { c = glow(dots, vec4f(0.0), base, vec4f(0.0)); }
+    default: { c = glow(v, halo, base, vein.deep); }
   }
   if (near) {
     c += e.light * select(vec3f(0.22, 0.2, 0.12), vec3f(-0.04, -0.03, -0.12), V.style == 2u);
@@ -762,35 +1336,75 @@ fn scene(p: vec2f, s: vec2f) -> vec3f {
   return c;
 }
 
-// ---- Electrodes (ADR 0047) ----------------------------------------------------------------------------
-// The poles of the Electrode tool, on top of the picture. Display only. They lie in the fourth byte of a cell of
-// `env` (paint.wgsl): above 191 the cathode, any other byte above 0 the anode. `shape` has no byte for them.
+// ---- Electrodes (ADR 0047, ADR 0058) ------------------------------------------------------------------
+// The poles of the Electrode tool, on top of the picture. Display only. `poles` holds their outlines as `shape` holds
+// those of walls and food (paint.wgsl POLES): the distance to the outline of the cathodes in the first byte of a cell
+// and to the outline of the anodes in the second. So a pole has the outline of its strokes at every zoom, as food and
+// walls have, and a surface: a stud whose rim slopes up from the outline, lit by the light of the picture, with a
+// highlight, a thin dark line along its outline and a shadow on the side away from the light.
 
 const CATHODE = vec3f(0.05, 0.32, 1.0);  // linear RGB: blue, the pole that attracts
 const ANODE = vec3f(1.0, 0.08, 0.04);    // red, the pole that repels
-const POLE_OPACITY = 0.9;
+const POLE_RIM = 1.5;      // cells: the slope of a pole, from its outline to its flat top (POLE_RIM in paint.wgsl)
+const POLE_SHADOW = 2.0;   // cells that the shadow of a pole reaches beside its outline
 
-// The pole of grid cell c as (cathode, anode), each 0 or 1. The cell as shapeIndex() takes it.
-fn poleOf(c: vec2i) -> vec2f {
-  let b = env[shapeIndex(c)] >> 24u;
-  return vec2f(select(0.0, 1.0, b > 191u), select(0.0, 1.0, b > 0u && b <= 191u));
+// The 3 × 3 cells of `poles` around cell c (cellsAround()).
+fn poleCells(c: vec2i) -> array<u32, 9> {
+  let k = cellsAround(c);
+  var w: array<u32, 9>;
+  for (var i = 0; i < 9; i++) { w[i] = poles[k[i]]; }
+  return w;
 }
 
-// The picture c with the electrodes at p over it: each pole covers where the bilinear mix of its 4 cells around p
-// passes one half, so the outline of a round dab is round at every zoom.
+// A pole at a point: its lit surface, how much of the pixel it covers, and its shadow on what lies beside it.
+struct Stud {
+  color: vec3f,
+  cover: f32,
+  shadow: f32,
+}
+
+// The stud of the colour `base` where the distance to its outline is `sd` cells (positive inside), `coverSd` for the
+// coverage (envAt()) and `grad` the gradient of the distance.
+// - The surface is a dome over the outer POLE_RIM cells: its height rises as t (2 − t) with t the share of the rim
+//   that lies behind, so it is steepest at the outline and flat from the rim on. The light is the one of the walls.
+// - The line: the colour gets darker toward the outline, over a pixel and a half: a third of a cell at least, and
+//   three quarters of a cell at most, so that a small pole keeps its colour in a view zoomed out.
+// - The shadow lies outside the outline, where the pole stands between the point and the light: the gradient points
+//   to the pole there, and so toward the light. It fades over POLE_SHADOW cells. The gradient is about 1 long beside
+//   an outline and shorter where two outlines are as near (the middle of a gap): the shadow fades there with it.
+fn studAt(base: vec3f, sd: f32, coverSd: f32, grad: vec2f) -> Stud {
+  var s: Stud;
+  s.cover = cover(coverSd);
+  let toLight = clamp(dot(grad, normalize(SUN.xy)), 0.0, 1.0);
+  s.shadow = smoothstep(-POLE_SHADOW, 0.0, sd) * toLight * (1.0 - s.cover);
+  if (s.cover <= 0.0) { return s; }
+  let t = clamp(sd / POLE_RIM, 0.0, 1.0);
+  let n = normalize(vec3f(-grad * (2.0 * (1.0 - t) / POLE_RIM), 1.0));
+  let diffuse = max(dot(n, SUN), 0.0);
+  let spec = pow(max(dot(n, normalize(SUN + vec3f(0.0, 0.0, 1.0))), 0.0), 60.0);
+  let lit = base * (0.5 + 0.7 * diffuse) + 0.6 * spec;
+  let line = 1.0 - smoothstep(0.0, clamp(1.5 * V.scale, 0.35, 0.75), sd);
+  s.color = mix(lit, 0.25 * base, 0.6 * line);
+  return s;
+}
+
+// The picture c with the electrodes at p over it. A cell holds one pole, so the two outlines never cross: where they
+// meet, each pole covers its share of the pixel.
 fn electrodes(c: vec3f, p: vec2f) -> vec3f {
-  let q = p - 0.5;
-  let i = vec2i(floor(q));
-  let f = q - floor(q);
-  var cover = vec2f(0.0);
-  for (var dy = 0; dy < 2; dy++) {
-    for (var dx = 0; dx < 2; dx++) {
-      let w = select(1.0 - f.x, f.x, dx == 1) * select(1.0 - f.y, f.y, dy == 1);
-      cover += w * poleOf(i + vec2i(dx, dy));
-    }
-  }
-  let a = POLE_OPACITY * smoothstep(vec2f(0.4), vec2f(0.6), cover);
-  return mix(mix(c, CATHODE, a.x), ANODE, a.y);
+  let cells = poleCells(vec2i(floor(p)));
+  var any = 0u;
+  for (var k = 0; k < 9; k++) { any |= cells[k]; }
+  // No pole within the reach of the outline distances.
+  if (any == 0u) { return c; }
+  let e = envAt(p, cells);
+  let cathode = studAt(CATHODE, e.wall, e.wallCover, e.wallGrad);
+  let anode = studAt(ANODE, e.food, e.foodCover, e.foodGrad);
+  // The shadow is as dark as the one of a wall in each style (walls()).
+  let ground = c * (1.0 - byStyle(vec3f(0.75), vec3f(0.6), vec3f(0.3)).x * max(cathode.shadow, anode.shadow));
+  let both = cathode.cover + anode.cover;
+  if (both <= 0.0) { return ground; }
+  let surface = (cathode.cover * cathode.color + anode.cover * anode.color) / both;
+  return mix(ground, surface, min(both, 1.0));
 }
 
 // ---- Scent view (SCENT) -------------------------------------------------------------------------------
@@ -1080,10 +1694,12 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     c = select(mix(c, inner, inside), inner, inside >= 1.0);
   }
   // A periodic lattice (ADR 0026): its copies show dimmed in the free space beside it, with a ramp one pixel wide
-  // across its edge. A grid shaped like the screen shows them as they are (copies 1).
+  // across its edge. A grid shaped like the screen shows them as they are (copies 1). A copy dims the light that the
+  // screen shows of the lattice, so the light ends at 1 first: a highlight of the gel has more light than that, and
+  // the highlights of a copy would stay brighter than the rest of the copy (ADR 0060).
   if (V.fx.z < 1.0) {
     let edge = cover(min(min(p.x, p.y), min(s.x - p.x, s.y - p.y)));
-    c = mix(mix(space, c, V.fx.z), c, edge);
+    c = mix(mix(space, clamp(c, vec3f(0.0), vec3f(1.0)), V.fx.z), c, edge);
   }
   // Triangular dither of ±1 LSB against banding in dark gradients.
   let n = hash(vec2u(frag.xy)) - hash(vec2u(frag.xy) + vec2u(7919u, 104729u));

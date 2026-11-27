@@ -11,7 +11,7 @@ import {
 import { latticeText, type EnvShape } from '../model/presets';
 import { FrameBudget, SLACK } from './budget';
 import { paintsCell } from './brush';
-import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit } from './environment';
+import { fromShape, fromStroke, MIN_RADIUS, sameEdit, snap, strokeOn, type EnvEdit, type Painted } from './environment';
 import { GpuUnavailableError, OutOfMemoryError } from './gpu';
 import { flowOn } from './flow';
 import { foodStrokes, NO_SITES, SiteCells } from './sites';
@@ -27,12 +27,19 @@ import {
   GROWTH_BYTES_PER_AGENT,
   GROWTH_BYTES_PER_CELL,
   memoryBudget,
+  paidBytesPerAgent,
+  slimeBytesPerCell,
+  sinkBytesPerCell,
+  driftBytesPerCell,
+  territoryBytesPerCell,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
   viewTrailOn,
 } from './sizing';
+import { slimeModel } from './slime';
 import { compact, Placement, sweeping } from './sweep';
-import type { Backend, Levels, Sim, Stroke, View } from './types';
+import { TERRITORY, territoryOn } from './territory';
+import { paints, type Backend, type Levels, type Sim, type Stroke, type View } from './types';
 
 /**
  * Most frames in flight at which the loop still starts a frame (ADR 0028): with two frames on the GPU a third would
@@ -168,8 +175,8 @@ export class Engine {
   /** Steps of a tool held while paused not run yet (PAUSED_TOOL_STEPS), as the budget counts steps. */
   private pausedSteps = 0;
   /**
-   * Every food, light, wall and erase edit since the last clear or preset load, less those the sweep deleted
-   * (sweep.ts): each new simulation paints them.
+   * Every food, light, wall, electrode, slime and erase edit since the last clear or preset load, less those the
+   * sweep deleted (sweep.ts): each new simulation paints them.
    */
   private edits: EnvEdit[] = [];
   /** How many of `edits` the current simulation holds; the next frame paints the rest. */
@@ -233,7 +240,13 @@ export class Engine {
     const now = this.settings;
     // The flow was off, so nobody kept the food sites (syncSites()).
     if (flowOn(now) && !flowOn(prev)) this.syncSites();
-    if (RESET_KEYS.some((k) => now[k] !== prev[k]) || shares(now) !== shares(prev)) this.reset();
+    // The rules of stage 4 start with the start territory, which a reset writes (seedAtFood(), ADR 0068): a switch of
+    // them restarts the population too, also when the flow or growth turns them on or off.
+    const restart = RESET_KEYS.some((k) => now[k] !== prev[k]) || territoryOn(now) !== territoryOn(prev);
+    // The Jones model has no slime field (ADR 0055, decision 10): a switch back gives the model a new field, which
+    // starts with the painted slime only. A reset paints it too (reset()).
+    if (restart || shares(now) !== shares(prev)) this.reset();
+    else if (slimeModel(now) && !slimeModel(prev)) this.repaintSlime();
   }
 
   /**
@@ -309,8 +322,18 @@ export class Engine {
       (growth ? GROWTH_BYTES_PER_CELL : 0) +
       flowBytesPerCell(s) +
       tubesBytesPerCell(s, tubeMapBytesPerCell) +
+      // The slime field by the model that runs (ADR 0055): on a backend without the rule, a scene of the Jones model
+      // runs on the extended model (constrain()).
+      slimeBytesPerCell(constrain({ ...s, collisions })) +
+      // The rules of stage 4 by the rule that the backend runs: they need growth (ADR 0068).
+      territoryBytesPerCell({ ...s, collisions }) +
+      sinkBytesPerCell({ ...s, collisions }, this.backend.sinkBytesPerCell) +
+      // What the sensors read of the flow, on a backend that holds it apart from the strains (ADR 0075).
+      driftBytesPerCell({ ...s, collisions }, this.backend.driftBytesPerCell) +
       (viewTrailOn(s) ? VIEW_BYTES_PER_CELL : 0);
-    const bytesPerAgent = this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0);
+    // The key of the births that the flux pays while the rules of stage 4 run (ADR 0071).
+    const bytesPerAgent =
+      this.backend.bytesPerAgent + (growth ? GROWTH_BYTES_PER_AGENT : 0) + paidBytesPerAgent({ ...s, collisions });
     const budget = memoryBudget(memory);
     const limits = { maxAgents, maxBufferBytes, maxGridSide, bytesPerCell, bytesPerAgent, budget };
     // With the rule the capacity is at most one agent per cell (capacityOf()): count what this backend runs.
@@ -389,6 +412,7 @@ export class Engine {
       this.sim.update(this.settings);
       this.flushEnv();
       this.sim.reset();
+      this.repaintSlime();
       this.seedAtFood();
       this.backend.forget();
       this.restarts++;
@@ -442,9 +466,31 @@ export class Engine {
   reset() {
     if (this.rebuilding) return; // the new simulation starts fresh anyway
     this.sim.reset();
+    this.repaintSlime();
     this.seedAtFood();
     this.backend.forget();
     this.restarts++;
+  }
+
+  /**
+   * Paints the slime of the edit list again (ADR 0055, decision 7): after a reset of the simulation, which clears
+   * every stamp, and when a switch of the model gives the model its field again. The simulation gets the edits that it
+   * holds from the first slime edit on, in their order: a stroke of the Slime tool stamps its open cells, and an erase
+   * and a wall clear the stamp of theirs (Sim.paintSlime()). An erase or a wall before the first slime edit clears
+   * nothing in a field without a stamp. The stamp is the one of the current step: 0 after a reset, before the colonies
+   * of the start layout Food take their steps (seedAtFood()).
+   *
+   * The field is then the one that the strokes painted one after another, cell for cell. After the last stroke that
+   * reaches a cell and changes the field there, no stroke changes whether the cell is a wall. So the walls of now say
+   * for that stroke what the walls said when it was painted.
+   */
+  private repaintSlime() {
+    if (!slimeModel(this.settings)) return;
+    const held = this.edits.slice(0, this.painted);
+    const first = held.findIndex((e) => e.kind === 'slime');
+    if (first < 0) return;
+    const { width, height } = this.sim;
+    this.sim.paintSlime(held.slice(first).flatMap((e) => strokeOn(e, width, height) ?? []));
   }
 
   /**
@@ -453,27 +499,37 @@ export class Engine {
    * run at a food source. Each strain has a food of its own (ADR 0032): strain A the first food stroke of the list,
    * strain B the second, and so on, one step for each, at the start of the stroke. A food stroke is a dab or every
    * segment of one drag, as a food site of the flow is (ADR 0029, decision 17; sites.ts foodStrokes()): so a dragged
-   * line is one food here too. A strain without such a food starts without agents. About FOOD_TRIES
-   * dead agents try a random point of the disc; with the rule one agent takes each cell they hit (about FOOD_START),
-   * and without it about FOOD_START agents try. The steps are the first steps of the run, the same in every run of a
-   * seed. With one strain it is the one step on the first food that it was.
+   * line is one food here too. A start spot of a scene takes the place of a food (ADR 0066): strain A starts at the
+   * first start spot of the list, if there is one, strain B at the second, and so on. A strain without either starts
+   * without agents. About FOOD_TRIES dead agents try a random point of the disc; with the rule one agent takes each
+   * cell they hit (about FOOD_START), and without it about FOOD_START agents try. The steps are the first steps of the
+   * run, the same in every run of a seed. With one strain it is the one step on the first food that it was.
+   *
+   * While the rules of stage 4 run, the step of a strain comes after its start territory: the open cells within
+   * TERRITORY.rim cells of the disc join the territory of the strain (ADR 0067, decision 4; ADR 0068). No agent of the
+   * strain lives before its step, so the steps of the strains before change nothing of its territory.
    */
   private seedAtFood() {
     if (this.settings.layout !== 'food') return;
     const foods = foodStrokes(this.edits).map((stroke) => stroke[0]);
+    const starts = this.edits.filter((e) => e.kind === 'start');
     const agents = strainAgents(this.settings.strains, this.sim.agents);
     this.settings.strains.forEach((_, strain) => {
-      const food = foods[strain];
+      const food = starts[strain] ?? foods[strain];
       const at = food && strokeOn(food, this.sim.width, this.sim.height);
       if (!at) return;
       const dead = Math.max(1, agents[strain] ?? 0);
       const revive = Math.min(1, (this.settings.collisions ? FOOD_TRIES : FOOD_START) / dead);
       const [x, y] = at.from;
+      if (territoryOn(this.settings)) this.sim.addTerritory(strain, x, y, FOOD_RADIUS + TERRITORY.rim);
       this.sim.run(1, { kind: AgentToolKind.inoculate, x, y, radius: FOOD_RADIUS, strain, revive });
     });
   }
 
-  /** Removes food, light and walls, also from simulations built later. Strokes not painted yet go too. */
+  /**
+   * Removes food, light, walls, electrodes and painted slime, also from simulations built later. Strokes not painted
+   * yet go too. The simulation also clears the slime that the colony left (Sim.clearEnvironment()).
+   */
   clearEnvironment() {
     this.edits = [];
     this.painted = 0;
@@ -601,7 +657,9 @@ export class Engine {
     if (gone.size === 0) return false;
     // The simulation holds the first `painted` edits. One of them that goes keeps its cells there until the strokes
     // that cleared them are painted, also when those go too: so the simulation gets every stroke recorded so far.
-    if (this.live && [...gone].some((i) => i < this.painted)) this.flushEnv();
+    // With a slime field it gets them in every case (ADR 0055, decision 7): an erase that clears no edit still clears
+    // the slime that the colony left, and the sweep can delete it before a frame painted it.
+    if (this.live && (slimeModel(this.settings) || [...gone].some((i) => i < this.painted))) this.flushEnv();
     this.painted -= [...gone].filter((i) => i < this.painted).length;
     compact(this.edits, gone);
     this.placement?.remove(gone);
@@ -611,7 +669,8 @@ export class Engine {
 
   /**
    * Paints the edits the current simulation does not hold yet, mapped to its grid, in one call. Each goes through the
-   * canonical frame of the arena it was painted in (strokeOn()), whatever arena the simulation runs in.
+   * canonical frame of the arena it was painted in (strokeOn()), whatever arena the simulation runs in. A start spot
+   * paints nothing (ADR 0066): the simulation does not get it.
    */
   private flushEnv() {
     if (this.painted === this.edits.length) return;
@@ -626,7 +685,7 @@ export class Engine {
       for (const s of strokes) this.placement.add(s);
     }
     this.painted = this.edits.length;
-    this.sim.paint(strokes.filter((s) => s !== undefined));
+    this.sim.paint(strokes.filter((s): s is Painted => s !== undefined && paints(s.kind)));
     this.syncSites();
   }
 

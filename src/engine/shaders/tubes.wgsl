@@ -1,8 +1,10 @@
-// The picture of the tubes (ADR 0034), while the flow in the tubes is on and the setting shows it. Prepended with
-// common.wgsl. Display only: no pass of the simulation reads what these passes write. tubes.ts states the rule and
-// holds the numbers; sim.ts sets them as the constants of the pipelines.
+// The picture of the tubes (ADR 0034), while the flow in the tubes is on and the setting shows it, and the stream of
+// the grains, while the flow is on, with the setting or without it (ADR 0095). Prepended with common.wgsl. Display
+// only: no pass of the simulation reads what these passes write. tubes.ts states the rule and holds the numbers;
+// sim.ts sets them as the constants of the pipelines.
 //
-// `roots` runs first, then `picture` and `stream`, once for each state that a frame draws:
+// `roots` runs first, then `picture`, once for each state that a frame draws with the picture. `stream` runs once for
+// each state that a frame draws with the grains, with the picture or without it:
 // - `roots`: per cell and strain the fourth root of the strength across the tube, the factor of the radius and of the
 //   brightness of the tube that the cell holds; 0 on a cell without a tube of the strain and on a cell of a wall.
 // - `picture`: per cell and strain the trail that the view draws. A workgroup draws a tile of TILE × TILE cells: it
@@ -186,6 +188,21 @@ fn picture(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_
   textureStore(pictureOut, p, max(SHEET * textureLoad(trail, p, 0), tube));
 }
 
+//#if EIGHT
+
+// The stream over 8 neighbours (ADR 0086), as the flow of `update` in flow.wgsl runs then: the lines between `//#if
+// EIGHT` and `//#endif` are part of the source only with it (variant.ts). An axis edge conducts AXIS times the harmonic
+// mean of its two cells, a diagonal edge DIAG times (flow.ts FLOW_EIGHT).
+const AXIS = 0.414213568; // √2 − 1
+const DIAG = 0.292893231; // 1 − 1/√2
+
+// Whether the cell at q (not wrapped) is open for the flow: in the arena and no cell of a wall (openXY in flow.wgsl).
+fn flowOpen(q: vec2i) -> bool {
+  let c = cellXY(q);
+  return c.x >= 0 && wallByte(c) < WALL_BYTE;
+}
+//#endif
+
 // The stream of the plasm of strain s through the cell p (cellXY). xy: the direction of the flux of the lane with the
 // largest flux. z: its speed, the flux over the root of the conductivity of the cell. The flux of a lane is that of
 // `update` in flow.wgsl, from the pressure and the conductivities that the memory holds (z). A wall and a cell outside
@@ -209,6 +226,25 @@ fn streamOf(p: vec2i, s: u32) -> vec3f {
     x += f32(o.x) * leaves;
     y += f32(o.y) * leaves;
   }
+//#if EIGHT
+  // Over 8 neighbours: the axis edges with the weight AXIS, and the 4 diagonal edges with DIAG where both cells beside
+  // the edge are open. A diagonal edge points along (±1, ±1), the step between the centres of its cells.
+  flux *= AXIS;
+  x *= AXIS;
+  y *= AXIS;
+  for (var k = 0; k < 4; k++) {
+    let o = vec2i(1 - 2 * (k & 1), 1 - 2 * (k >> 1u)); // south-east, south-west, north-east, north-west
+    if (!flowOpen(p + vec2i(o.x, 0)) || !flowOpen(p + vec2i(0, o.y))) { continue; }
+    let n = cellXY(p + o);
+    if (n.x < 0) { continue; }
+    let gn = textureLoad(memory, n, s, 0).z;
+    if (gn <= 0.0) { continue; }
+    let leaves = DIAG * (2.0 * g * gn / (g + gn)) * (own - textureLoad(pressure, n, s, 0));
+    flux += abs(leaves);
+    x += f32(o.x) * leaves;
+    y += f32(o.y) * leaves;
+  }
+//#endif
   var lane = 0;
   for (var k = 1; k < 4; k++) { if (flux[k] > flux[lane]) { lane = k; } }
   let along = vec2f(x[lane], y[lane]);

@@ -1,13 +1,24 @@
 // The picture of the tubes on both backends (ADR 0034), in Chromium with real GPU APIs (ADR 0010): the passes against
 // the CPU reference, the rule in plain cases, and the frames that the view draws from the picture.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { hexToLinear } from '../model/color';
 import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
 import { FLOW } from './flow';
 import { WebGl2Backend } from './gl/backend';
+import { BACKGROUND } from './render';
 import { flowSites, type FoodStroke } from './sites';
 import { TUBE_MAP_BYTES_PER_CELL_GL } from './sizing';
-import { STREAM, TUBE_REACH, TUBE_TILE, TUBE_WINDOW, TUBES } from './tubes';
-import { arenaCell, tubePicture, tubeRoots, tubeStream, wallOnLine, type TubeGrid } from './tubes-reference';
+import { STREAM, TUBE_REACH, TUBE_TILE, TUBE_WINDOW, TUBES, VEINS } from './tubes';
+import {
+  arenaCell,
+  tubePicture,
+  tubeRoots,
+  tubeStream,
+  veinDeep,
+  veinShade,
+  wallOnLine,
+  type TubeGrid,
+} from './tubes-reference';
 import type { Backend, Levels, Sim, Stroke, View } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -19,6 +30,8 @@ const BACKENDS = {
 /** An extended scene with the flow on and the picture of the tubes. */
 const flowing = (patch: Partial<Settings> = {}): Settings => ({
   ...defaultSettings(),
+  // The frames of these tests draw the glow style unless they name another one.
+  style: 'glow',
   model: 'extended',
   flow: true,
   boundary: 'box',
@@ -38,6 +51,12 @@ function noise(c: number, salt: number): number {
 
 /** The red value of a pixel of a drawn frame, 0 to 255. Strain A is yellow: its trail is red and green. */
 const red = (img: ImageData, x: number, y: number) => img.data[(y * img.width + x) * 4] ?? 0;
+
+/** Linear light → sRGB byte, without the dither (render.wgsl `srgb`). */
+const toByte = (c: number) => {
+  const x = Math.min(1, Math.max(0, c));
+  return Math.round((x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055) * 255);
+};
 
 /** The largest difference of one pixel of two frames in red, green or blue. */
 const pixelDiff = (a: ImageData, b: ImageData, x: number, y: number) =>
@@ -159,10 +178,12 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
 
   beforeAll(async () => {
     backend = await create(document.createElement('canvas'));
-    // The first picture compiles its pipelines: here, under a long timeout (flow.gpu.test.ts has the times).
+    // The first picture and the first stream compile their pipelines: here, under a long timeout (flow.gpu.test.ts has
+    // the times).
     const sim = await backend.createSim(flowing(), 16, 16, 8);
     sim.writeFlow(new Float32Array(16 * 16 * 4));
     await sim.readPicture();
+    await sim.readStream();
     sim.destroy();
   }, 600_000);
   afterEach(() => {
@@ -549,8 +570,12 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     const [plain, tubes] = [await levelsOf(false), await levelsOf(true)];
     for (const place of ['png', 'frames', 'settled'] as const) {
       // The picture of the tubes holds other levels: the band is at a quarter, and the tube is wider. The frames of
-      // WebGPU go a quarter of the way from the levels of before to a measurement.
-      expect(Math.abs(tubes[place].gain / plain[place].gain - 1), place).toBeGreaterThan(0.05);
+      // WebGPU go a quarter of the way from the levels of before to a measurement. Every cell of this scene holds an
+      // agent, so the black level is half the median trail of the picture (ADR 0062): with the tubes a quarter of the
+      // one without them. Both black levels lie lower than the 65th percentile did, so the gains differ less.
+      expect(Math.abs(tubes[place].gain / plain[place].gain - 1), place).toBeGreaterThan(0.02);
+      expect(tubes[place].black, place).toBeGreaterThan(0);
+      expect(tubes[place].black / plain[place].black, place).toBeLessThan(0.5);
       expect(tubes[place].strand, place).toBeGreaterThan(0);
       expect(tubes[place].strand, place).toBe(plain[place].strand);
     }
@@ -589,8 +614,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       // Three cells beside the trail: the tube with the switch, the ground without it.
       expect(pixelDiff(on, off, 260, 220), `${style}, beside the trail`).toBeGreaterThan(40);
       // On the trail both frames hold plasmodium. The gel style lights a ridge and a plateau in other ways, so only
-      // the flat styles are compared there.
-      if (style !== 'gel') expect(pixelDiff(on, off, 260, 196), `${style}, on the trail`).toBeLessThan(40);
+      // the flat styles are compared there, and only in red: the tube is a whole vein, whose deeper shade has less
+      // green and blue (ADR 0099).
+      if (style !== 'gel')
+        expect(Math.abs(red(on, 260, 196) - red(off, 260, 196)), `${style}, on the trail`).toBeLessThan(40);
     }
     const [on, off] = [await frame({}, near8), await frame({ showTubes: false }, near8)];
     expect([red(on, 260, 220), red(off, 260, 220)].map((v) => v > 120)).toEqual([true, false]);
@@ -631,6 +658,72 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     const [dark, darkOff] = [await frame({ bloom: 0 }), await frame({ bloom: 0, showTubes: false })];
     expect(Math.abs(red(dark, 260, y) - red(darkOff, 260, y))).toBeLessThanOrEqual(2);
     expect(red(on, 260, y)).toBeGreaterThan(red(dark, 260, y) + 10);
+  });
+
+  it('draws the veins in the deep shade of their strain as the CPU reference says, and none without the picture', async () => {
+    const [w, h] = [64, 48];
+    // A band of tubes along rows 15 to 33 whose flow memory falls away from row 24: veins of every strength, from none
+    // at the edges of the band to whole ones in its middle (VEINS.low to VEINS.high).
+    const trail = new Float32Array(w * h * 4);
+    for (let c = 0; c < w * h; c++) trail[c * 4] = 6;
+    const memory = memoryOf(w, h, (_, y) => (Math.abs(y - 24) <= 9 ? [0.55 ** Math.abs(y - 24), 1] : undefined));
+    const sim = await make(flowing({ bloom: 0 }), w, h);
+    sim.writeTrail(trail);
+    sim.writeFlow(memory);
+    const grid: TubeGrid = { width: w, height: h, boundary: 'box', shape: await sim.readShape() };
+    const view: View = { center: [32, 24], scale: 1 / 8 };
+    const [cw, ch] = [512, 384];
+    const color = hexToLinear(defaultStrain(0).color);
+    const ground = hexToLinear(BACKGROUND.glow);
+    /** The glow of strain A at a pixel (render.wgsl glow(), bloom 0, black level 0), as sRGB bytes without the dither. */
+    const glowAt = (picture: Float32Array, roots: Float32Array | undefined, px: number, py: number) => {
+      const [x, y] = [(px + 0.5 - cw / 2) * view.scale + 32, (py + 0.5 - ch / 2) * view.scale + 24];
+      const [i, j] = [Math.floor(x - 0.5), Math.floor(y - 0.5)];
+      const [fx, fy] = [x - 0.5 - i, y - 0.5 - j];
+      const at = (a: number, b: number) => picture[(b * w + a) * 4] ?? 0;
+      const v =
+        (at(i, j) * (1 - fx) + at(i + 1, j) * fx) * (1 - fy) + (at(i, j + 1) * (1 - fx) + at(i + 1, j + 1) * fx) * fy;
+      const deep = roots ? (veinDeep(grid, roots, x, y)[0] ?? 0) : 0;
+      return {
+        deep,
+        bytes: veinShade(color, deep).map((c, k) =>
+          toByte((ground[k] ?? 0) + (1 - (ground[k] ?? 0)) * (1 - Math.exp(-v * c * LEVELS.gain))),
+        ),
+      };
+    };
+    const frame = async (patch: Partial<Settings>) => {
+      const settings = flowing({ bloom: 0, ...patch });
+      sim.update(settings);
+      return backend.capture(sim, settings, view, cw, ch, LEVELS);
+    };
+    // Every 3rd pixel of a column across the band, and of a row along its middle.
+    const pixels: [number, number][] = [];
+    for (let py = 96; py < 288; py += 3) pixels.push([260, py]);
+    for (let px = 40; px < 480; px += 11) pixels.push([px, 196]);
+    for (const patch of [{}, { showTubes: false }, { flow: false }]) {
+      const img = await frame(patch);
+      const picture = await sim.readPicture();
+      const roots = patch.showTubes === false || patch.flow === false ? undefined : await sim.readTubeRoots();
+      let [worstOff, whole, part, apart] = [0, 0, 0, 0];
+      for (const [px, py] of pixels) {
+        const want = glowAt(picture, roots, px, py);
+        const got = [0, 1, 2].map((k) => img.data[(py * cw + px) * 4 + k] ?? 0);
+        // The dither adds up to 1 byte.
+        worstOff = Math.max(worstOff, ...got.map((g, k) => Math.abs(g - (want.bytes[k] ?? 0))));
+        if (want.deep >= 0.95 * VEINS.deep) whole++;
+        else if (want.deep > 0.05) part++;
+        const plain = glowAt(picture, undefined, px, py).bytes;
+        if (Math.max(...plain.map((b, k) => Math.abs(b - (want.bytes[k] ?? 0)))) > 20) apart++;
+      }
+      expect(worstOff, JSON.stringify(patch)).toBeLessThanOrEqual(2);
+      if (roots) {
+        // The case is not empty: whole veins, veins in part, and both far from the colour of the strain.
+        expect([whole, part].map((n) => n > 10)).toEqual([true, true]);
+        expect(apart).toBeGreaterThan(40);
+      } else {
+        expect(whole + part).toBe(0);
+      }
+    }
   });
 
   it('draws the scent of the state of each frame under the picture', async () => {
@@ -715,6 +808,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     await check(moving({ stepOrder: 'sense-first' }), 'sensing first');
     await check(moving({ strains: [strain, { ...defaultStrain(1), sensorOffset: 5 }] }), 'two strains');
     await check(moving({ showTubes: false }), 'without the picture');
+    // Without the picture the frames draw the grains from a stream of their own (ADR 0095). The flow frees the stream
+    // and makes it again, and a frame must not keep the stream of a frame before.
+    await check(moving({ showTubes: false, flow: false }), 'without the picture and the flow');
+    await check(moving({ showTubes: false }), 'without the picture, with the flow again');
     await check(moving({}), 'with the picture again');
     expect((await device?.popErrorScope())?.message).toBeUndefined();
   }, 120_000);
@@ -1048,6 +1145,50 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     },
   );
 
+  // ADR 0086: over 8 neighbours the stream follows the 8 edges of the flow. A thin diagonal wall, whose cells touch
+  // only at their corners, bars every diagonal edge across it, and a wall along a column has two ends.
+  it.each(['box', 'wrap', 'dish'] as const)(
+    'gives the stream of the CPU reference over 8 neighbours on a %s grid with walls',
+    async (boundary) => {
+      const [w, h] = [40, 32];
+      const sim = await make(flowing({ boundary, flowEdges: 8, strains: [0, 1].map((i) => defaultStrain(i)) }), w, h);
+      sim.paint([
+        { kind: 'wall', from: [6, 4], to: [20, 18], radius: 0.5 },
+        { kind: 'wall', from: [30.5, 2], to: [30.5, 28], radius: 0.5 },
+      ]);
+      const grid: TubeGrid = { width: w, height: h, boundary, shape: await sim.readShape() };
+      const wall = (c: number) => (grid.shape[c * 4] ?? 0) >= 128;
+      // The thin wall: (10, 8) and (11, 9) are walls, the cells beside them at the corner, (11, 8) and (10, 9), are not.
+      expect([wall(8 * w + 10), wall(9 * w + 11), wall(8 * w + 11), wall(9 * w + 10)]).toEqual([
+        true,
+        true,
+        false,
+        false,
+      ]);
+      const [memories, pressures] = [
+        [0, 1].map(() => new Float32Array(w * h * 4)),
+        [0, 1].map(() => new Float32Array(w * h * 4)),
+      ];
+      for (let s = 0; s < 2; s++) {
+        const [memory, pressure] = [memories[s] ?? new Float32Array(0), pressures[s] ?? new Float32Array(0)];
+        for (let c = 0; c < w * h; c++) {
+          // A tube on most cells, none on a wall, and pressures that give speeds below 1 and above it.
+          const body = wall(c) || noise(c, 70 + s) < 0.2 ? 0 : noise(c, 80 + s);
+          const d = 10 ** (-4 * noise(c, 90 + s));
+          memory.set([d, body, body > 0 ? body * (0.02 + d) : 0, 0], c * 4);
+          for (let lane = 0; lane < 4; lane++) pressure[c * 4 + lane] = 25 * noise(c, 100 + 4 * s + lane) ** 2;
+        }
+        sim.writeFlow(memory, s);
+        sim.writePressure(pressure, s);
+      }
+      const want = tubeStream(grid, memories, pressures, true);
+      const got = await sim.readStream();
+      expect(worst(got, want, 1)).toBeLessThan(1e-4);
+      // The stream over 4 neighbours is another one: the test sees the diagonal edges.
+      expect(worst(tubeStream(grid, memories, pressures), want, 1)).toBeGreaterThan(0.05);
+    },
+  );
+
   it('gives a stream from high to low pressure, as fast as the flux over the root of the conductivity', async () => {
     const [w, h] = [24, 12];
     const sim = await make(flowing({ strains: [defaultStrain(0), defaultStrain(1)] }), w, h);
@@ -1102,6 +1243,36 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(worst(await sim.readStream(), await streamReference(sim, 'box', 2), 1)).toBeLessThan(1e-5);
   });
 
+  it('gives the stream with the switch of the picture on or off, and none in the agents style or without the flow', async () => {
+    // ADR 0095: the switch changes only the tubes, and the grains follow the stream without the picture too.
+    const [w, h] = [24, 12];
+    const sim = await make(flowing(), w, h);
+    const at = (stream: Float32Array) => near(stream[(6 * w + 10) * 4]);
+    const east = pressing(w, h, (x) => [0, 0, -2 * x, 0]);
+    sim.writeFlow(conducting(w, h, (x, y) => (y === 6 && x >= 4 && x <= 19 ? 0.25 : 0)));
+    sim.writePressure(east);
+    const on = await sim.readStream();
+    expect(at(on)).toBe(0.5);
+    sim.update(flowing({ showTubes: false }));
+    expect([...(await sim.readStream())]).toEqual([...on]);
+    // No picture of the tubes: the picture is the trail of the view.
+    expect((await sim.readTubeRoots()).length).toBe(0);
+    expect([...(await sim.readPicture())]).toEqual([...(await sim.readView())]);
+    // The stream follows a new pressure without the picture.
+    sim.writePressure(pressing(w, h, (x) => [0, 0, 2 * x, 0]));
+    expect(at(await sim.readStream())).toBe(-0.5);
+    sim.writePressure(east);
+    // The agents style draws no grains, with the switch on or off, and the stream comes back with a style of the trail.
+    for (const showTubes of [true, false]) {
+      sim.update(flowing({ showTubes, style: 'agents' }));
+      expect((await sim.readStream()).length, `agents, switch ${String(showTubes)}`).toBe(0);
+      sim.update(flowing({ showTubes }));
+      expect([...(await sim.readStream())], `glow, switch ${String(showTubes)}`).toEqual([...on]);
+    }
+    sim.update(flowing({ showTubes: false, flow: false }));
+    expect((await sim.readStream()).length).toBe(0);
+  });
+
   it('moves grains along the stream in every style that draws the trail, and draws none without a flow', async () => {
     const [w, h] = [64, 48];
     const sim = await make(flowing({ bloom: 0 }), w, h);
@@ -1115,10 +1286,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
     expect(near((await sim.readStream())[(24 * w + 32) * 4])).toBe(0.5);
     // 8 pixels per cell around the cell (32, 24).
     const view: View = { center: [32, 24], scale: 1 / 8 };
-    const frame = async (step: number, style: Settings['style'] = 'glow') => {
+    const frame = async (step: number, style: Settings['style'] = 'glow', showTubes = true) => {
       // The pattern of the grains follows the step of the state (render.ts packView()).
       (sim as unknown as { step: number }).step = step;
-      const settings = flowing({ bloom: 0, style });
+      const settings = flowing({ bloom: 0, style, showTubes });
       sim.update(settings);
       return backend.capture(sim, settings, view, 512, 384, LEVELS);
     };
@@ -1171,13 +1342,19 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       for (let x = 32; x < 480; x++) if (pixelDiff(on, off, x, 192) > 12) differ++;
       expect(differ, style).toBeGreaterThan(40);
     }
+    // Without the picture of the tubes the grains move over the trail of the view, as far as with it (ADR 0095).
+    const plain = [band(await frame(4, 'glow', false)), band(await frame(6, 'glow', false))] as const;
+    expect([...(await sim.readPicture())]).toEqual([...(await sim.readView())]);
+    expect(shift(...plain)).toBeGreaterThanOrEqual(10);
+    expect(shift(...plain)).toBeLessThanOrEqual(12);
+    expect(spread(plain[0])).toBeGreaterThan(40);
     // Without a fall of the pressure nothing flows: the frames of two steps are the same but for the dither.
     sim.writePressure(pressing(w, h, () => [0, 0, 0, 0]));
     for (const style of ['glow', 'gel', 'paper'] as const)
       expect(frameDiff(await frame(4, style), await frame(8, style)), style).toBeLessThanOrEqual(2);
   });
 
-  it.runIf(kind === 'webgl2').each([2, 3, 4, 5])(
+  it.runIf(kind === 'webgl2').each([2, 3, 4])(
     'frees the targets of the picture that are made when target %i cannot be made',
     async (failing) => {
       const [w, h] = [32, 24];
@@ -1187,9 +1364,10 @@ describe.each(Object.entries(BACKENDS))('the picture of the tubes on %s', (kind,
       sim.writeTrail(trail);
       sim.writeFlow(memoryOf(w, h, (_, y) => (y === 12 ? [1, 1] : undefined)));
       const gl = (backend as unknown as { gl: WebGL2RenderingContext }).gl;
-      // The picture needs five targets: three of the cells, and the map of its tiles and the rows of that map. The
-      // framebuffer of one is not complete, as when the GPU is short of memory: the target frees its own texture, and
-      // the simulation must free the textures of the targets before it.
+      // The picture needs four targets: two of the cells, and the map of its tiles and the rows of that map. The stream
+      // of the grains has a target of its own (ADR 0095). The framebuffer of one is not complete, as when the GPU is
+      // short of memory: the target frees its own texture, and the simulation must free the textures of the targets
+      // before it.
       const [check, drop] = [gl.checkFramebufferStatus.bind(gl), gl.deleteTexture.bind(gl)];
       let [checks, freed] = [0, 0];
       gl.checkFramebufferStatus = (target) => (++checks === failing ? gl.FRAMEBUFFER_UNSUPPORTED : check(target));

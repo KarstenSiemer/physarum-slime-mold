@@ -4,6 +4,9 @@
 // - maze-campaign <folder> <prefix>...   the logs <prefix>-s<seed>.jsonl of run-maze.ts or run-maze-sites.ts
 // - tokyo-campaign <folder> <prefix>...  the logs <prefix>-s<seed>.jsonl of run-tokyo.ts, one line per measured step
 // - engine-maze <file>...                the lines of engine/measure-maze.ts
+// - engine-mazes <file>...               the lines of engine/measure-mazes.ts: per run without the seed and per window
+//                                        of 10,000 steps (WINDOW=<steps> for another size), the least and the most of
+//                                        the seeds (ADR 0054)
 // - engine-tokyo <file>...               the lines of engine/measure-tokyo.ts, per step
 // - engine-tokyo-end <file>...           the same lines: the samples with all food sources joined, mean and deviation
 // - compare <folder> <folder>            the logs of the same name in two folders, row by row: a rerun against the record
@@ -213,6 +216,73 @@ function engineMaze(files: string[]) {
     }
     const last = steps[steps.length - 1] ?? 1;
     console.log(`  ms per step: ${range([...seeds.values()].map((s) => (s.get(last)?.ms ?? NaN) / last))}`);
+  }
+}
+
+/**
+ * The windows of the runs of a maze with growth, from the lines of engine/measure-mazes.ts (ADR 0054): per run without
+ * the seed and per window, the median of the seeds with their least and their most. A line holds its numbers with two
+ * digits, so a mean of the blind branches from these lines is right to about 0.001.
+ */
+function engineMazes(files: string[]) {
+  const size = Number(process.env.WINDOW ?? 10_000);
+  interface Row {
+    step: number;
+    joined: boolean;
+    onRoute: number;
+    /** Snail maze: the trail of each blind branch over that of the route. */
+    blind: number[];
+    /** Corn maze: the routes with a tube, each by its number of rooms. */
+    routes: number[] | undefined;
+  }
+  const rows = new Map<string, Map<number, Row[]>>();
+  const pattern = /^(\S+)-s(\d+) (\d+) alive \d+ ratio \S+ joined (\w+) tube \S+ onRoute (\S+) (.*)$/;
+  for (const line of files.flatMap((f) => textOf(f).split('\n'))) {
+    const m = pattern.exec(line);
+    if (!m) continue;
+    const blind = /^blind (\S+) blindFlow/.exec(m[6]!)?.[1];
+    const routes = /^routes (\S+) doors/.exec(m[6]!)?.[1];
+    const seeds = rows.get(m[1]!) ?? new Map<number, Row[]>();
+    rows.set(m[1]!, seeds);
+    const list = seeds.get(Number(m[2])) ?? [];
+    seeds.set(Number(m[2]), list);
+    list.push({
+      step: Number(m[3]),
+      joined: m[4] === 'true',
+      onRoute: Number(m[5]),
+      blind: blind === undefined ? [] : blind.split(',').map(Number),
+      routes: routes === undefined ? undefined : routes === '-' ? [] : routes.split(',').map(Number),
+    });
+  }
+  const share = (part: Row[], test: (r: Row) => boolean) => part.filter(test).length / part.length;
+  for (const [name, seeds] of rows) {
+    const all = [...seeds.values()];
+    const end = Math.max(...all.flatMap((list) => list.map((r) => r.step)));
+    // The shortest route: the least number of rooms of a route with a tube in these runs.
+    const shortest = Math.min(...all.flatMap((list) => list.flatMap((r) => r.routes ?? [])));
+    console.log(`== ${name}: ${String(seeds.size)} seeds, windows of ${String(size)} steps`);
+    for (let from = 0; from < end; from += size) {
+      const parts = all
+        .map((list) => list.filter((r) => r.step > from && r.step <= from + size))
+        .filter((part) => part.length > 0);
+      if (parts.length === 0) continue;
+      const scene = parts[0]?.[0]?.routes
+        ? `tube on a longer route ${range(parts.map((p) => share(p, (r) => (r.routes ?? []).some((l) => l !== shortest))))}`
+        : `blind ${range(
+            parts.map((p) => mean(p.flatMap((r) => r.blind))),
+            3,
+          )} | a blind branch at 0.10 or more ${range(
+            parts.map((p) => {
+              const values = p.flatMap((r) => r.blind);
+              return values.filter((v) => v >= 0.1).length / values.length;
+            }),
+          )}`;
+      console.log(
+        `  steps ${String(from).padStart(6)} to ${String(from + size).padStart(6)} (${String(parts.length)} seeds): joined ${range(
+          parts.map((p) => share(p, (r) => r.joined)),
+        )} | onRoute ${range(parts.map((p) => mean(p.map((r) => r.onRoute))))} | ${scene}`,
+      );
+    }
   }
 }
 
@@ -618,6 +688,7 @@ const USAGE: Record<string, [least: number, what: string]> = {
   'maze-campaign': [2, '<folder> <prefix>...'],
   'tokyo-campaign': [2, '<folder> <prefix>...'],
   'engine-maze': [1, '<file>...'],
+  'engine-mazes': [1, '<file>...'],
   'engine-tokyo': [1, '<file>...'],
   'engine-tokyo-end': [1, '<file>...'],
   compare: [2, '<folder of the rerun> <folder of the record>'],
@@ -641,6 +712,7 @@ if (rest.length < usage[0]) {
 if (table === 'maze-campaign') mazeCampaign(rest[0] ?? '', rest.slice(1));
 else if (table === 'tokyo-campaign') tokyoCampaign(rest[0] ?? '', rest.slice(1));
 else if (table === 'engine-maze') engineMaze(rest);
+else if (table === 'engine-mazes') engineMazes(rest);
 else if (table === 'engine-tokyo') engineTokyo(rest);
 else if (table === 'engine-tokyo-end') engineTokyoEnd(rest);
 else if (table === 'compare') compare(rest[0] ?? '', rest[1] ?? '');

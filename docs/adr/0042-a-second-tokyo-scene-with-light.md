@@ -8,6 +8,8 @@
 - Changes [ADR 0021](0021-links-carry-food-light-and-walls.md): a link of version 3.
 - Extended by ADR 0050 (2026-11-16): light stops growth, the scene runs it at 1, and two cells of the coast are dark
   (51 lit cells).
+- Changed by ADR 0054 (2026-11-17): the scene runs a flow strength of 2.8 and not of 1.4, as the Tokyo rail network,
+  and it is measured again there.
 - In short: [`research/flow/README.md`](../../research/flow/README.md), part 14, has the commands and the tables.
 
 ## Context

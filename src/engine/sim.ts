@@ -1,7 +1,7 @@
 import { BOUNDARIES, type Boundary, type Settings } from '../model/params';
 import { at } from './at';
 import { outlineBox, ownHeldEverywhere, paintBox, paintSegments, type Rect } from './brush';
-import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowOn, flowStrains, packFlow } from './flow';
+import { FLOW, FLOW_BYTES, FLOW_ITERATIONS, FLOW_SITES, flowEight, flowOn, flowStrains, packFlow } from './flow';
 import {
   CLEAR_TILE,
   growthOn,
@@ -13,30 +13,54 @@ import {
   trailSaturation,
   type AgentTool,
 } from './pack';
-import { readBuffer, readTexture } from './readback';
+import { readBuffer, readPixels, readTexture } from './readback';
 import { NO_SITES, SITE_BLOCK, type FlowSites } from './sites';
+import { slimeModel, slimeSteps } from './slime';
 import agentsWgsl from './shaders/agents.wgsl?raw';
+import brushWgsl from './shaders/brush.wgsl?raw';
 import common from './shaders/common.wgsl?raw';
 import diffuseWgsl from './shaders/diffuse.wgsl?raw';
 import flowWgsl from './shaders/flow.wgsl?raw';
 import growthWgsl from './shaders/growth.wgsl?raw';
 import initWgsl from './shaders/init.wgsl?raw';
 import paintWgsl from './shaders/paint.wgsl?raw';
+import amountWgsl from './shaders/amount.wgsl?raw';
+import slimePaintWgsl from './shaders/slime-paint.wgsl?raw';
+import slimeWgsl from './shaders/slime.wgsl?raw';
 import sortWgsl from './shaders/sort.wgsl?raw';
+import sinksWgsl from './shaders/sinks.wgsl?raw';
+import territoryWgsl from './shaders/territory.wgsl?raw';
 import tubesWgsl from './shaders/tubes.wgsl?raw';
 import { variant } from './shaders/variant';
 import wallsWgsl from './shaders/walls.wgsl?raw';
 import { diffusePlanOf, viewTrailOn, type Diffuse } from './sizing';
-import { STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
-import { EnvKind, isPole, releases, SHAPE_RANGE, type AgentState, type Sim, type Stroke } from './types';
+import { PAID_COUNT_LANES, PAID_COUNTS_BYTE, PAID_COUNTS_BYTES, PAID_KEYS_BYTE } from './paid';
+import { SINK_STATE_LANES, SINK_SUM_WORDS } from './sinks';
+import { packTerritory, territoryOn } from './territory';
+import { grainsShown, STREAM, TUBE_TILE, TUBE_WINDOW, TUBES, tubesShown } from './tubes';
+import {
+  changesSlime,
+  EnvKind,
+  isPole,
+  paintsEnv,
+  polesOutlined,
+  releases,
+  SHAPE_RANGE,
+  type AgentState,
+  type Sim,
+  type Stroke,
+} from './types';
 
 const AGENT_BYTES = 16;
 const GROUP = 256;
 const TILE = 16;
 /** Brush segments per submission (paint()): 4096 slots of 256 bytes. */
 const BRUSH_CHUNK = 4096;
-/** One brush slot as paint.wgsl `Brush` reads it: the segment, its paint box and its outline box. */
-const BRUSH_BYTES = 48;
+/**
+ * One brush slot as brush.wgsl `Brush` reads it: the segment, its paint box, its outline box and the boundary of the
+ * simulation.
+ */
+const BRUSH_BYTES = 56;
 /** The narrowest eraser with a workgroup of 16 × 16 cells more than 4.05 cells inside it (paint.wgsl eraserCore). */
 const CORE_RADIUS = 10.61 + SHAPE_RANGE + 0.05;
 /** Steps between two spatial sorts of the agents. Measured: their locality halves about 150 steps after a sort. */
@@ -45,6 +69,8 @@ const SORT_INTERVAL = 32;
 const SORT_TILE = 8;
 /** Cells per side of a workgroup of the flow passes (flow.wgsl). */
 const FLOW_GROUP = 8;
+/** Cells per side of a workgroup of the pass of the stamps (slime.wgsl). */
+const SLIME_GROUP = 8;
 
 type Pair<T> = [T, T];
 type Bit = 0 | 1;
@@ -94,14 +120,56 @@ interface FlowState {
   cellsCurrent: boolean;
 }
 /**
+ * The territory of each strain and the owners (ADR 0068; territory.wgsl), while the rules of stage 4 run: two
+ * textures of one byte per cell, 4 cells per texel, that the push writes in turn, and the owners, 4 cells to a word.
+ */
+interface TerritoryState {
+  textures: Pair<GPUTexture>;
+  views: Pair<GPUTextureView>;
+  owners: GPUBuffer;
+  /** The uniform of `addDisc`: the centre, the radius and the strain of a disc. */
+  disc: GPUBuffer;
+}
+/**
+ * The sinks of each strain (ADR 0069; sinks.wgsl), while the rules of stage 4 run: the sink rate of every cell and
+ * strain, which the pass `sinks` updates in place; the sums of each strain, 4 words that its atomics add up in a step;
+ * and the state of each strain, 2 vec4 that the pass `state` writes in place.
+ */
+interface SinkState {
+  /** The strains of the settings that the state was made for. */
+  strains: number;
+  rates: GPUBuffer;
+  sums: GPUBuffer;
+  /**
+   * The state of each strain, then the counts F and K of the paid births of each strain, then the key of every agent
+   * (paid.ts PAID_COUNTS_BYTE and PAID_KEYS_BYTE; ADR 0067, decision 7).
+   */
+  state: GPUBuffer;
+  /**
+   * What the sink of each cell takes over the conductivity of the cell (flow.wgsl `takes`, ADR 0075), a layer per
+   * strain that the pass writes at the start of a step, for the sensors of its agent passes.
+   */
+  takes: GPUTexture;
+  /** Per strain: its layer of `takes`, for the pass. */
+  takeViews: GPUTextureView[];
+  /** Every layer of `takes`, for the agent passes: an agent reads the layer of its strain. */
+  takeArray: GPUTextureView;
+}
+/**
  * The textures of the picture of the tubes (tubes.wgsl, ADR 0034), allocated while the settings show it: per cell and
- * strain the factor of the radius of its tube, and the trail that the view draws; per cell the stream of the plasm.
+ * strain the factor of the radius of its tube, and the trail that the view draws.
  */
 interface TubeState {
   roots: GPUTexture;
   rootsView: GPUTextureView;
   picture: GPUTexture;
   pictureView: GPUTextureView;
+}
+/**
+ * The texture of the stream of the plasm (tubes.wgsl `stream`), allocated while the view draws the grains (tubes.ts
+ * grainsShown(), ADR 0095), with the picture of the tubes or without it.
+ */
+interface StreamState {
   stream: GPUTexture;
   streamView: GPUTextureView;
 }
@@ -158,6 +226,9 @@ export class Simulation implements Sim {
   /** The picture of the tubes (pictureTexture), and whether a change of the state since made it stale. */
   private tubes?: TubeState | undefined;
   private tubesStale = true;
+  /** The stream of the grains (streamTexture), and whether a change of the state since made it stale. */
+  private stream?: StreamState | undefined;
+  private streamStale = true;
   readonly counts: GPUBuffer;
   readonly env: GPUBuffer;
   /** Outline distances, light and the walls' shadow, for the renderer only (paint.wgsl `outline`). */
@@ -170,8 +241,18 @@ export class Simulation implements Sim {
   /** An electrode was painted, or bytes written held one, since the last clear (ADR 0047). */
   hasElectrodes = false;
   /**
-   * The boundary under which every byte of `shape` is held to `env`. After a change of boundary, or after strokes
-   * painted under another boundary (then undefined), syncShape() holds it again before its next use.
+   * The outline distances of the electrodes, for the renderer only (paint.wgsl `outline` with POLES, ADR 0058): per
+   * cell the distance to the outline of the cathodes and to the outline of the anodes, as `shape` holds those of walls
+   * and food, 4 B each. Held while `hasElectrodes` says that a pole may lie in `env`: made at the first pole, and
+   * freed by a clear. The fit of the grid counts it from the start (sizing.ts BYTES_PER_CELL), so a stroke never
+   * changes the grid.
+   */
+  private poles?: GPUBuffer | undefined;
+  /** The bind group of the outline pass on `poles`, in the layout of the paint pass. */
+  private polesGroup?: GPUBindGroup | undefined;
+  /**
+   * The boundary under which every byte of `shape` and of `poles` is held to `env`. After a change of boundary, or
+   * after strokes painted under another boundary (then undefined), syncShape() holds them again before their next use.
    */
   private shapeHeld: Boundary | undefined;
   readonly stats: GPUBuffer;
@@ -180,12 +261,39 @@ export class Simulation implements Sim {
   private growth?: GrowthBuffers | undefined;
   /** The state of the flow in the tubes, while it is on (ADR 0029). */
   private flow?: FlowState | undefined;
+  /** The territory and the owners, while the rules of stage 4 run (ADR 0068); `territoryT` names the current copy. */
+  private territory?: TerritoryState | undefined;
+  private territoryT: Bit = 0;
+  /** The sinks of each strain, while the rules of stage 4 run (ADR 0069). */
+  private sinks?: SinkState | undefined;
   /** Which memory texture is current, and which pressure texture holds the pressure in work. */
   private flowM: Bit = 0;
   private flowP = 0;
   /** The food sites that give and take the flux, with their cells (foodSites()). */
   private sites: FlowSites = NO_SITES;
   private readonly flowData = new ArrayBuffer(FLOW_BYTES);
+  /**
+   * The slime field (slime.wgsl, ADR 0055): the stamp of every cell, 4 B each (slime.ts). Held while the model of the
+   * settings has slime, with a life time above 0 or with 0 (slimeModel()); the fit of the grid counts it then
+   * (sizing.ts slimeBytesPerCell()).
+   */
+  private slime?: GPUBuffer | undefined;
+  /**
+   * The amount of slime of every cell (ADR 0057; amount.wgsl), 4 B each: made and freed with the stamps (ensureSlime(),
+   * dropSlime()), and counted with them. Only the picture reads it.
+   */
+  private amount?: GPUBuffer | undefined;
+  /**
+   * The front field (ADR 0060; slime.wgsl `front`), 4 B per cell: the step, plus 1, at which the growth front reached
+   * the cell. It has a meaning only while the cell has slime. Made and freed with the stamps, and counted with them.
+   */
+  private front?: GPUBuffer | undefined;
+  /**
+   * A cell of the slime field may hold a stamp: the pass of the stamps ran, or the Slime tool painted, since the field
+   * was last empty (a new field, a reset, a clear of the environment). Only then does an erase or a wall clear stamps
+   * (brushSlime()): a scene that paints its walls before its first step runs no pass for them.
+   */
+  private stamped = false;
   private paintGroup?: GPUBindGroup;
   /**
    * A wall was painted since the last clear: moves and sensors then check every cell they cross (agents.wgsl
@@ -280,6 +388,13 @@ export class Simulation implements Sim {
     this.groups = [x, Math.ceil(n / x)];
     // Now, inside the caller's out-of-memory scope, even while collisions are off: the budget counts them.
     this.ensureCollision();
+    // So with the slime field, while the model has it, and with the territory and the sinks while the rules of stage 4
+    // run.
+    if (slimeModel(settings)) this.ensureSlime();
+    if (territoryOn(settings)) {
+      this.ensureTerritory();
+      this.ensureSinks();
+    }
   }
 
   /**
@@ -388,10 +503,11 @@ export class Simulation implements Sim {
     return this.viewThird;
   }
 
-  /** A change of the state: the view's map and the picture of the tubes are made anew at their next use. */
+  /** A change of the state: the view's map, the picture of the tubes and the stream are made anew at their next use. */
   private changed() {
     this.viewStale = true;
     this.tubesStale = true;
+    this.streamStale = true;
   }
 
   /**
@@ -407,16 +523,26 @@ export class Simulation implements Sim {
   }
 
   /**
-   * The stream of the plasm of the state that pictureTexture draws (tubes.ts, point 6): per cell the direction of the
-   * flow times its speed. Undefined while the view draws no picture of the tubes.
+   * The factors of the radius of the tubes of the picture (tubes.wgsl `roots`), for the veins of the view (ADR 0099):
+   * set after pictureTexture while it is the picture of the tubes, else undefined. Display only.
    */
-  get streamTexture(): GPUTexture | undefined {
-    if (!tubesShown(this.settings) || !this.flow) return undefined;
-    if (this.tubesStale || !this.tubes) return this.encodeTubes(this.flow).stream;
-    return this.tubes.stream;
+  get veinTexture(): GPUTexture | undefined {
+    if (!tubesShown(this.settings) || !this.flow || this.tubesStale) return undefined;
+    return this.tubes?.roots;
   }
 
-  /** The passes of pictureTexture: the factor of the radius of every tube, the picture, and the stream. */
+  /**
+   * The stream of the plasm of the state that the view draws (tubes.ts, point 6): per cell the direction of the flow
+   * times its speed, for the grains. Made once for each state while the view draws the grains (tubes.ts grainsShown()),
+   * with the picture of the tubes or without it (ADR 0095). Undefined while the view draws no grains.
+   */
+  get streamTexture(): GPUTexture | undefined {
+    if (!grainsShown(this.settings) || !this.flow) return undefined;
+    if (this.streamStale || !this.stream) return this.encodeStream(this.flow).stream;
+    return this.stream.stream;
+  }
+
+  /** The passes of pictureTexture: the factor of the radius of every tube, and the picture. */
   private encodeTubes(flow: FlowState): TubeState {
     this.syncShape();
     // Before the parameters of these passes: moving first the view's passes write theirs (encodeView()).
@@ -456,59 +582,91 @@ export class Simulation implements Sim {
       ]),
     );
     pass.dispatchWorkgroups(...groups);
-    pass.setPipeline(k.stream);
-    pass.setBindGroup(
-      0,
-      this.bind(`tubeStream${this.flowM}${String(this.flowP)}`, k.stream, [
-        this.params,
-        null,
-        null,
-        flow.memoryArrays[this.flowM],
-        null,
-        null,
-        null,
-        at(flow.pressureArrays, this.flowP),
-        tubes.streamView,
-      ]),
-    );
-    pass.dispatchWorkgroups(...groups);
     pass.end();
     this.device.queue.submit([enc.finish()]);
     this.tubesStale = false;
     return tubes;
   }
 
+  /** The pass of streamTexture. It reads the flow, and not the picture of the tubes. */
+  private encodeStream(flow: FlowState): StreamState {
+    this.syncShape();
+    this.writeParams();
+    const stream = this.ensureStream();
+    // Over 8 neighbours the stream follows the 8 edges of the flow, and it reads the wall bytes (ADR 0086).
+    const eight = flowEight(this.settings);
+    const pipeline = eight ? this.kernels.tubeStreamEight() : this.kernels.tubeStream();
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(
+      0,
+      this.bind(`tubeStream${this.flowM}${String(this.flowP)}${eight ? '-e8' : ''}`, pipeline, [
+        this.params,
+        null,
+        eight ? this.shapeBuffer : null,
+        flow.memoryArrays[this.flowM],
+        null,
+        null,
+        null,
+        at(flow.pressureArrays, this.flowP),
+        stream.streamView,
+      ]),
+    );
+    pass.dispatchWorkgroups(Math.ceil(this.width / TUBE_TILE), Math.ceil(this.height / TUBE_TILE));
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.streamStale = false;
+    return stream;
+  }
+
   /** The textures of the picture of the tubes, made at their first use (sizing.ts TUBES_BYTES_PER_CELL counts them). */
   private ensureTubes(): TubeState {
     if (!this.tubes) {
-      const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
-      const make = () => this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
-      const [roots, picture, stream] = [make(), make(), make()];
-      this.tubes = {
-        roots,
-        rootsView: roots.createView(),
-        picture,
-        pictureView: picture.createView(),
-        stream,
-        streamView: stream.createView(),
-      };
+      const [roots, picture] = [this.cellTexture(), this.cellTexture()];
+      this.tubes = { roots, rootsView: roots.createView(), picture, pictureView: picture.createView() };
     }
     return this.tubes;
   }
 
-  /** Frees the textures of the picture of the tubes, and every bind group that holds a part of the picture's passes. */
+  /** The texture of the stream, made at its first use (sizing.ts TUBES_BYTES_PER_CELL counts it with the picture). */
+  private ensureStream(): StreamState {
+    if (!this.stream) {
+      const stream = this.cellTexture();
+      this.stream = { stream, streamView: stream.createView() };
+    }
+    return this.stream;
+  }
+
+  /** A texture of 4 floats per cell, for the picture of the tubes and for the stream. */
+  private cellTexture(): GPUTexture {
+    const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
+    return this.device.createTexture({ size: [this.width, this.height], format: 'rgba32float', usage });
+  }
+
+  /** Frees the textures of the picture of the tubes, and every bind group of the passes of the picture and the stream. */
   private dropTubes() {
     this.tubes?.roots.destroy();
     this.tubes?.picture.destroy();
-    this.tubes?.stream.destroy();
     this.tubes = undefined;
     this.forgetTubes();
   }
 
-  /** Drops the bind groups of the picture's passes: they hold the memory of the flow and the trail of the view. */
+  /** Frees the texture of the stream, and every bind group of the passes of the picture and the stream. */
+  private dropStream() {
+    this.stream?.stream.destroy();
+    this.stream = undefined;
+    this.forgetTubes();
+  }
+
+  /**
+   * Drops the bind groups of the passes of the picture and of the stream: they hold the memory of the flow, the trail
+   * of the view and the textures of both. Both are made anew at their next use.
+   */
   private forgetTubes() {
     for (const key of [...this.bindCache.keys()]) if (key.startsWith('tube')) this.bindCache.delete(key);
     this.tubesStale = true;
+    this.streamStale = true;
   }
 
   /** For tests: the trail that the picture draws (pictureTexture), 4 lanes per cell. */
@@ -516,7 +674,7 @@ export class Simulation implements Sim {
     return readTexture(this.device, this.pictureTexture, 4);
   }
 
-  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty without the picture of the tubes. */
+  /** For tests: the stream of the plasm, 4 values per cell (x, y, 0, 0); empty while the view draws no grains. */
   async readStream(): Promise<Float32Array> {
     const stream = this.streamTexture;
     return stream ? readTexture(this.device, stream, 4) : new Float32Array(0);
@@ -552,16 +710,61 @@ export class Simulation implements Sim {
     return this.ensureCollision().occ[this.occParity];
   }
 
+  /**
+   * The agents per cell after the last step while the rule of one agent per cell runs: the agents are then the plasm,
+   * and the auto levels keep the black level below their trail (exposure.ts levels(), ADR 0062). Nothing without the
+   * rule: agents share cells then, and nobody keeps the buffer up to date.
+   */
+  get agentCells(): GPUBuffer | undefined {
+    return this.settings.collisions ? this.occupancy : undefined;
+  }
+
+  /**
+   * The agents that moved into each cell in the last step, per strain (`counts`), while agents share cells: the auto
+   * levels keep the white level above their trail (exposure.ts levels(), ADR 0090). Nothing with the rule of one
+   * agent per cell: agentCells is the plasm then.
+   */
+  get movedCells(): GPUBuffer | undefined {
+    return this.settings.collisions ? undefined : this.counts;
+  }
+
   /** Outline distances, light and the walls' shadow for the renderer; call syncShape() before reading it. */
   get shape(): GPUBuffer {
     return this.shapeBuffer;
   }
 
   /**
+   * For the renderer: the outline distances of the electrodes (`poles`), or undefined while no pole may lie in `env`
+   * (`hasElectrodes`). Call syncShape() before reading it.
+   */
+  get poleField(): GPUBuffer | undefined {
+    return this.poles;
+  }
+
+  /** The outline distances of the electrodes, made at the first pole. A new buffer holds zeros: no pole is near. */
+  private ensurePoles(): GPUBuffer {
+    this.poles ??= this.device.createBuffer({
+      size: this.width * this.height * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    return this.poles;
+  }
+
+  /** Frees the outline distances of the electrodes, and every bind group that holds them: `env` holds no pole. */
+  private dropPoles() {
+    if (!this.poles) return;
+    this.poles.destroy();
+    this.poles = undefined;
+    this.polesGroup = undefined;
+    this.bindCache.delete('refreshPoles');
+  }
+
+  /**
    * Holds `shape` to `env` under the current boundary (paint.wgsl `refresh`), once after the boundary changed or
    * after strokes under another boundary (ADR 0019 replays each edit under its own): a dish counts fewer cells than
    * the box or the periodic grid, and the periodic grid has neighbours across its edges. Called before every
-   * readback and frame, and by paint() after a change of boundary; it does nothing while `shape` is held.
+   * readback and frame, and by paint() after a change of boundary; it does nothing while `shape` is held. The outline
+   * distances of the electrodes follow in the same way, while the simulation holds them.
    */
   syncShape() {
     if (this.shapeHeld === this.settings.boundary) return;
@@ -569,11 +772,18 @@ export class Simulation implements Sim {
     this.shapeHeld = this.settings.boundary;
     if (!this.hasEnvironment) return; // nothing painted: `shape` holds only zeros, under every boundary
     this.writeParams();
+    const groups = [Math.ceil(this.width / TILE), Math.ceil(this.height / TILE)] as const;
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(this.kernels.refresh);
     pass.setBindGroup(0, this.bind('refresh', this.kernels.refresh, [this.params, this.env, null, this.shapeBuffer]));
-    pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
+    pass.dispatchWorkgroups(...groups);
+    if (this.poles) {
+      const refresh = this.kernels.refreshPoles();
+      pass.setPipeline(refresh);
+      pass.setBindGroup(0, this.bind('refreshPoles', refresh, [this.params, this.env, null, this.poles]));
+      pass.dispatchWorkgroups(...groups);
+    }
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }
@@ -596,11 +806,17 @@ export class Simulation implements Sim {
       for (const key of [...this.bindCache.keys()]) if (key.startsWith('view')) this.bindCache.delete(key);
       this.forgetTubes();
     }
-    // The picture of the tubes holds its textures only while the settings show it (tubes.ts). The memory fit counts
-    // them with the flow, shown or not (sizing.ts tubesBytesPerCell()).
+    // The picture of the tubes holds its textures only while the settings show it, and the stream only while the view
+    // draws the grains (tubes.ts). The memory fit counts them with the flow, shown or not (sizing.ts
+    // tubesBytesPerCell()).
     if (!tubesShown(settings)) this.dropTubes();
+    if (!grainsShown(settings)) this.dropStream();
     // The memory fit counts the textures of the flow only while it is on (sizing.ts).
     if (!flowOn(settings)) this.dropFlow();
+    // The memory fit counts the slime field only in the model that has it (sizing.ts): the Jones model has no slime.
+    if (!slimeModel(settings)) this.dropSlime();
+    // The memory fit counts the territory only while the rules of stage 4 run (sizing.ts territoryBytesPerCell()).
+    if (!territoryOn(settings)) this.dropTerritory();
     // The memory fit counts the buffers of growth only while it is on (sizing.ts).
     if (!growthOn(settings) && this.growth) {
       const g = this.growth;
@@ -632,6 +848,15 @@ export class Simulation implements Sim {
     }
     enc.clearBuffer(this.counts);
     if (this.flow) this.clearFlow(enc, this.flow);
+    // A reset clears every stamp (ADR 0055, decision 3).
+    if (this.slime) enc.clearBuffer(this.slime);
+    if (this.amount) enc.clearBuffer(this.amount);
+    if (this.front) enc.clearBuffer(this.front);
+    this.stamped = false;
+    // A reset clears the territory (ADR 0068): the engine writes the start territory after it (Engine.seedAtFood()).
+    if (this.territory) this.clearTerritory(enc, this.territory);
+    // And the sinks: no cell was a sink before (ADR 0069).
+    if (this.sinks) for (const b of [this.sinks.rates, this.sinks.sums, this.sinks.state]) enc.clearBuffer(b);
     const pass = enc.beginComputePass();
     const init = this.starts().init;
     pass.setPipeline(init);
@@ -855,7 +1080,7 @@ export class Simulation implements Sim {
     const texture = at(this.ensureFlow().pressure, this.flowP);
     const size = [this.width, this.height];
     this.device.queue.writeTexture({ texture, origin: [0, 0, strain] }, data, { bytesPerRow: this.width * 16 }, size);
-    // The picture of the tubes shows the stream of the plasm (ADR 0034).
+    // The grains show the stream of the plasm (ADR 0034, ADR 0095).
     this.changed();
     this.revision++;
   }
@@ -864,6 +1089,88 @@ export class Simulation implements Sim {
   async readPressure(strain = 0): Promise<Float32Array> {
     if (!this.flow || !this.flowHolds(strain)) return new Float32Array(0);
     return readTexture(this.device, at(this.flow.pressure, this.flowP), 4, strain);
+  }
+
+  /**
+   * The slime field, made at its first use (sizing.ts SLIME_BYTES_PER_CELL counts it): the stamps, and the amounts
+   * with them. New buffers hold zeros: no cell has a stamp, and no cell has slime.
+   */
+  private ensureSlime(): { stamps: GPUBuffer; amounts: GPUBuffer; fronts: GPUBuffer } {
+    const make = () =>
+      this.device.createBuffer({
+        size: this.width * this.height * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      });
+    this.slime ??= make();
+    this.amount ??= make();
+    this.front ??= make();
+    return { stamps: this.slime, amounts: this.amount, fronts: this.front };
+  }
+
+  /**
+   * For the renderer: the slime field, which the picture reads for the film of the slime (render.wgsl `stamps`), or
+   * undefined while the simulation holds none: in the Jones model, and after a switch to the extended model until the
+   * first step or stroke that writes a stamp. No cell has a stamp then.
+   */
+  get slimeField(): GPUBuffer | undefined {
+    return this.slime;
+  }
+
+  /**
+   * For the renderer: the amount of slime of every cell (ADR 0057), which the picture reads beside the stamps, or
+   * undefined while the simulation holds no slime field.
+   */
+  get slimeAmount(): GPUBuffer | undefined {
+    return this.amount;
+  }
+
+  /**
+   * For the renderer: the front field (ADR 0060), which the picture reads for the skirt of the growth front, or
+   * undefined while the simulation holds no slime field.
+   */
+  get slimeFront(): GPUBuffer | undefined {
+    return this.front;
+  }
+
+  /** Frees the slime field, and every bind group that holds it. */
+  private dropSlime() {
+    if (!this.slime) return;
+    this.slime.destroy();
+    this.slime = undefined;
+    this.amount?.destroy();
+    this.amount = undefined;
+    this.front?.destroy();
+    this.front = undefined;
+    this.stamped = false;
+    for (const key of [...this.bindCache.keys()]) if (key.startsWith('slime')) this.bindCache.delete(key);
+  }
+
+  /**
+   * For tests and measurements: the stamp of every cell as the field holds it (slime.ts), one value per cell, rows
+   * from y = 0: 0 for a cell without a stamp, else the number of the step in which the cell last held plasm, plus 1.
+   * Only zeros in the Jones model, which has no slime.
+   */
+  async readSlime(): Promise<Uint32Array> {
+    if (!this.slime) return new Uint32Array(this.width * this.height);
+    return new Uint32Array(await readBuffer(this.device, this.slime));
+  }
+
+  /**
+   * For tests and measurements: the amount of slime of every cell as the field holds it (ADR 0057), one value per
+   * cell, rows from y = 0: 0 to SLIME_FULL (slime.ts). Only zeros in the Jones model, which has no slime.
+   */
+  async readSlimeAmount(): Promise<Uint32Array> {
+    if (!this.amount) return new Uint32Array(this.width * this.height);
+    return new Uint32Array(await readBuffer(this.device, this.amount));
+  }
+
+  /**
+   * For tests and measurements: the front stamp of every cell as the field holds it (ADR 0060), one value per cell,
+   * rows from y = 0. It has a meaning only in a cell that has slime. Only zeros in the Jones model.
+   */
+  async readSlimeFront(): Promise<Uint32Array> {
+    if (!this.front) return new Uint32Array(this.width * this.height);
+    return new Uint32Array(await readBuffer(this.device, this.front));
   }
 
   /** Runs `steps` simulation steps. The agent tool acts on every one of them (ADR 0023). */
@@ -912,20 +1219,10 @@ export class Simulation implements Sim {
   }
 
   /**
-   * Paints brush strokes in order, BRUSH_CHUNK segments per submission. Each dispatch picks its brush and its
-   * boundary's parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
-   * Every segment's paint dispatch is followed by its outline dispatch over its outline box (brush.ts outlineBox),
-   * in the same compute pass: each dispatch sees the writes of the one before, so the outline reads `env` as it is
-   * after its segment (paint.wgsl `outline`), as one call per stroke does.
+   * The parameters once per boundary into `paintParams`, for the brush strokes of this call: a stroke picks its
+   * boundary by offset, and the stamp of a stroke of the Slime tool is the one of the current step (`P.grid.w`).
    */
-  paint(strokes: readonly Stroke[]) {
-    if (strokes.length === 0) return;
-    this.changed();
-    this.revision++;
-    // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
-    // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
-    if (this.shapeHeld !== undefined) this.syncShape();
-    const step = this.offsetStep;
+  private writePaintParams() {
     const params = new ArrayBuffer(BOUNDARIES.length * this.paramsStep);
     BOUNDARIES.forEach((boundary, i) => {
       const rt = { width: this.width, height: this.height, agents: this.agents, step: this.step };
@@ -934,6 +1231,62 @@ export class Simulation implements Sim {
       );
     });
     this.device.queue.writeBuffer(this.paintParams, 0, params);
+  }
+
+  /**
+   * Writes the brush slots of some segments (brush.wgsl `Brush`), one per offset step: slot j holds segment j with
+   * its paint box, its outline box (none for the brush on the slime field) and the boundary of the simulation.
+   */
+  private writeBrushes(chunk: readonly Stroke[], boxOf: (j: number) => Rect, reachOf?: (j: number) => Rect) {
+    const step = this.offsetStep;
+    const data = new ArrayBuffer(chunk.length * step);
+    const f = new Float32Array(data);
+    const i32 = new Int32Array(data);
+    const u = new Uint32Array(data);
+    const arena = BOUNDARIES.indexOf(this.settings.boundary);
+    chunk.forEach(({ from, to, radius, kind }, j) => {
+      const [x, y] = boxOf(j);
+      const [rx, ry, rw, rh] = reachOf?.(j) ?? [0, 0, 0, 0];
+      const o = (j * step) / 4;
+      [f[o], f[o + 1], f[o + 2], f[o + 3]] = [from[0], from[1], to[0], to[1]];
+      [i32[o + 4], i32[o + 5]] = [x, y];
+      f[o + 6] = radius;
+      u[o + 7] = EnvKind[kind];
+      [i32[o + 8], i32[o + 9], u[o + 10], u[o + 11]] = [rx, ry, rw, rh];
+      u[o + 12] = arena;
+    });
+    this.device.queue.writeBuffer(this.brushes, 0, data);
+  }
+
+  /**
+   * Paints brush strokes in order, BRUSH_CHUNK segments per submission. Each dispatch picks its brush and its
+   * boundary's parameters by dynamic offset, so a replay of 100 000 strokes is 25 submissions instead of 100 000.
+   * Every segment's paint dispatch is followed by its outline dispatch over its outline box (brush.ts outlineBox),
+   * in the same compute pass: each dispatch sees the writes of the one before, so the outline reads `env` as it is
+   * after its segment (paint.wgsl `outline`), as one call per stroke does. A stroke of a pole has its outline in
+   * `poles` in place of `shape`, and an erase and a wall have one in both while `poles` may hold a pole.
+   *
+   * A stroke of the Slime tool changes no byte of `env` or `shape`. What the strokes do with the slime field follows
+   * after the environment of all of them (brushSlime()). That gives the field of one stroke after another: an erase or
+   * a wall that changes whether a cell is a wall also clears the stamp of that cell, after every stroke before it.
+   */
+  paint(strokes: readonly Stroke[]) {
+    const env = strokes.filter((s) => paintsEnv(s.kind));
+    const slime = slimeModel(this.settings) && strokes.some((s) => changesSlime(s.kind));
+    if (env.length === 0 && !slime) return;
+    this.revision++;
+    this.writePaintParams();
+    if (env.length > 0) this.paintEnv(env);
+    this.brushSlime(strokes);
+  }
+
+  /** The strokes of paint() that change the environment, with their outlines. */
+  private paintEnv(strokes: readonly Stroke[]) {
+    this.changed();
+    // After a change of boundary `shape` is held to `env` under the new one first. Strokes under another boundary
+    // leave that to the next readback or frame (below), so one call paints what one call per stroke paints.
+    if (this.shapeHeld !== undefined) this.syncShape();
+    const step = this.offsetStep;
     this.paintGroup ??= this.device.createBindGroup({
       layout: this.kernels.paintLayout,
       entries: [
@@ -950,6 +1303,8 @@ export class Simulation implements Sim {
     const reaches: Rect[] = [];
     const offsets: number[] = [];
     const own: boolean[] = [];
+    /** Per segment: whether `poles` takes its outline (polesOutlined()), by the poles that the strokes before left. */
+    const poled: boolean[] = [];
     let foreign = false;
     for (const stroke of strokes) {
       const boundary = stroke.boundary ?? this.settings.boundary;
@@ -967,39 +1322,52 @@ export class Simulation implements Sim {
         reaches.push(outlineBox(segment, this.width, this.height, wrap) ?? box);
         offsets.push(BOUNDARIES.indexOf(boundary) * this.paramsStep);
         own.push(!ownHeldEverywhere(segment, this.width, this.height, boundary));
+        poled.push(polesOutlined(stroke.kind, this.hasElectrodes));
       }
+    }
+    // The outlines of the electrodes, from the first pole on: before it no cell holds one.
+    let polesGroup: GPUBindGroup | undefined;
+    if (this.hasElectrodes) {
+      this.polesGroup ??= this.device.createBindGroup({
+        layout: this.kernels.paintLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.paintParams, size: PARAMS_BYTES } },
+          { binding: 1, resource: { buffer: this.env } },
+          { binding: 2, resource: { buffer: this.brushes, size: BRUSH_BYTES } },
+          { binding: 3, resource: { buffer: this.ensurePoles() } },
+        ],
+      });
+      polesGroup = this.polesGroup;
     }
     for (let first = 0; first < segments.length; first += BRUSH_CHUNK) {
       const chunk = segments.slice(first, first + BRUSH_CHUNK);
-      const data = new ArrayBuffer(chunk.length * step);
-      const f = new Float32Array(data);
-      const i32 = new Int32Array(data);
-      const u = new Uint32Array(data);
-      chunk.forEach(({ from, to, radius, kind }, j) => {
-        const [x, y] = boxes[first + j] ?? [0, 0];
-        const [rx, ry, rw, rh] = reaches[first + j] ?? [0, 0, 0, 0];
-        const o = (j * step) / 4;
-        [f[o], f[o + 1], f[o + 2], f[o + 3]] = [from[0], from[1], to[0], to[1]];
-        [i32[o + 4], i32[o + 5]] = [x, y];
-        f[o + 6] = radius;
-        u[o + 7] = EnvKind[kind];
-        [i32[o + 8], i32[o + 9], u[o + 10], u[o + 11]] = [rx, ry, rw, rh];
-      });
-      this.device.queue.writeBuffer(this.brushes, 0, data);
+      this.writeBrushes(
+        chunk,
+        (j) => boxes[first + j] ?? [0, 0, 0, 0],
+        (j) => reaches[first + j] ?? [0, 0, 0, 0],
+      );
       const enc = this.device.createCommandEncoder();
       const pass = enc.beginComputePass();
       chunk.forEach((_, j) => {
         const [, , w, h] = boxes[first + j] ?? [0, 0, 0, 0];
         const [, , rw, rh] = reaches[first + j] ?? [0, 0, 0, 0];
+        const dynamic = [offsets[first + j] ?? 0, j * step];
+        const searches = own[first + j] ?? true;
         pass.setPipeline(this.kernels.paint);
-        pass.setBindGroup(0, this.paintGroup, [offsets[first + j] ?? 0, j * step]);
+        pass.setBindGroup(0, this.paintGroup, dynamic);
         pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
         // Same layout: the bind group and its offsets stay. The eraser and walls load a tile of `env`; most segments
-        // need no search of their own cells.
-        // An electrode changes no byte of `shape`: the renderer reads its byte from `env` (render.wgsl poleAt).
-        if (isPole(chunk[j]?.kind ?? 'erase')) return;
-        pass.setPipeline(this.kernels.outline(outlineVariant(chunk[j], own[first + j] ?? true)));
-        pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
+        // need no search of their own cells. A pole changes no byte of `shape`: its outline lies in `poles`.
+        if (!isPole(chunk[j]?.kind ?? 'erase')) {
+          pass.setPipeline(this.kernels.outline(outlineVariant(chunk[j], searches)));
+          pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
+        }
+        // The same pass on the outlines of the electrodes: the group with `poles` in the place of `shape`.
+        if (polesGroup && poled[first + j]) {
+          pass.setPipeline(this.kernels.outline(outlineVariant(chunk[j], searches, true), true));
+          pass.setBindGroup(0, polesGroup, dynamic);
+          pass.dispatchWorkgroups(Math.ceil(rw / TILE), Math.ceil(rh / TILE));
+        }
       });
       pass.end();
       this.device.queue.submit([enc.finish()]);
@@ -1007,6 +1375,87 @@ export class Simulation implements Sim {
     if (foreign) this.shapeHeld = undefined;
     // Without walls no pass reads the clearance: an erase then needs none, and builds no pass for walls.
     if (this.walls && strokes.some((s) => s.kind === 'wall' || s.kind === 'erase')) this.updateClearance();
+  }
+
+  /**
+   * Paints only what the strokes do with the slime field (Sim.paintSlime(), ADR 0055, decision 7): the engine paints
+   * the slime of its edit list again after a reset, which clears every stamp. Nothing in the Jones model.
+   */
+  paintSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings) || !strokes.some((s) => changesSlime(s.kind))) return;
+    this.revision++;
+    this.writePaintParams();
+    this.brushSlime(strokes);
+  }
+
+  /**
+   * What strokes do with the slime field (slime-paint.wgsl), in their order, against `env` as it is now; the
+   * parameters of the call are in `paintParams` (writePaintParams()). A stroke of the Slime tool gives the open cells of
+   * its footprint the stamp of the current step, and an erase and a wall clear the stamp of their cells. Every other
+   * kind runs no pass, and so do an erase and a wall while no cell holds a stamp (`stamped`). BRUSH_CHUNK segments per
+   * submission, each over its paint box, as paint() does. Nothing in the Jones model, which has no field.
+   *
+   * paint() calls this after the environment of all its strokes. The field is still the one of one stroke after
+   * another. After the last stroke of the list that reaches a cell and changes the field there (slime, erase or wall),
+   * no stroke changes whether the cell is a wall. So `env` as it is now says for that stroke what `env` said when the
+   * stroke came, and an earlier stroke on that cell is written over.
+   */
+  private brushSlime(strokes: readonly Stroke[]) {
+    if (!slimeModel(this.settings)) return;
+    const segments: Stroke[] = [];
+    const boxes: Rect[] = [];
+    const offsets: number[] = [];
+    for (const stroke of strokes) {
+      if (stroke.kind === 'slime') this.stamped = true;
+      if (!changesSlime(stroke.kind) || !this.stamped) continue;
+      const boundary = stroke.boundary ?? this.settings.boundary;
+      const wrap = boundary === 'wrap';
+      for (const segment of paintSegments(stroke, this.width, this.height, wrap)) {
+        const box = paintBox(segment, this.width, this.height, wrap);
+        if (!box) continue;
+        segments.push(segment);
+        boxes.push(box);
+        offsets.push(BOUNDARIES.indexOf(boundary) * this.paramsStep);
+      }
+    }
+    if (segments.length === 0) return;
+    const brush = this.kernels.slimeBrush();
+    const group = this.bindCache.get('slimeBrush') ?? this.slimeBrushGroup(brush.layout);
+    for (let first = 0; first < segments.length; first += BRUSH_CHUNK) {
+      const chunk = segments.slice(first, first + BRUSH_CHUNK);
+      this.writeBrushes(chunk, (j) => boxes[first + j] ?? [0, 0, 0, 0]);
+      const enc = this.device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      pass.setPipeline(brush.pipeline);
+      chunk.forEach((_, j) => {
+        const [, , w, h] = boxes[first + j] ?? [0, 0, 0, 0];
+        pass.setBindGroup(0, group, [offsets[first + j] ?? 0, j * this.offsetStep]);
+        pass.dispatchWorkgroups(Math.ceil(w / TILE), Math.ceil(h / TILE));
+      });
+      pass.end();
+      this.device.queue.submit([enc.finish()]);
+    }
+  }
+
+  /**
+   * The bind group of the brush on the slime field, in the layout of the paint pass: the parameters of the stroke's
+   * boundary and the brush slot by dynamic offset, `env` to read, and the field. dropSlime() frees it with the field.
+   */
+  private slimeBrushGroup(layout: GPUBindGroupLayout): GPUBindGroup {
+    const field = this.ensureSlime();
+    const group = this.device.createBindGroup({
+      layout,
+      entries: [
+        { binding: 0, resource: { buffer: this.paintParams, size: PARAMS_BYTES } },
+        { binding: 1, resource: { buffer: this.env } },
+        { binding: 2, resource: { buffer: this.brushes, size: BRUSH_BYTES } },
+        { binding: 3, resource: { buffer: field.stamps } },
+        { binding: 4, resource: { buffer: field.amounts } },
+        { binding: 5, resource: { buffer: field.fronts } },
+      ],
+    });
+    this.bindCache.set('slimeBrush', group);
+    return group;
   }
 
   /**
@@ -1036,10 +1485,18 @@ export class Simulation implements Sim {
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.env);
     enc.clearBuffer(this.shapeBuffer);
+    // Clear clears every stamp, as an erase of the whole grid does (ADR 0055, decision 7).
+    const stamps = this.slime;
+    if (stamps) enc.clearBuffer(stamps);
+    if (this.amount) enc.clearBuffer(this.amount);
+    if (this.front) enc.clearBuffer(this.front);
+    this.stamped = false;
     this.device.queue.submit([enc.finish()]);
     [this.walls, this.wallOverAgents] = [false, false];
     this.hasEnvironment = false;
     this.hasElectrodes = false;
+    // No pole is left: the simulation holds their outlines again from the next pole on.
+    this.dropPoles();
     // The scent that the textures hold stays until the next reset.
     this.sources = false;
     this.shapeHeld = this.settings.boundary;
@@ -1094,6 +1551,12 @@ export class Simulation implements Sim {
     return new Uint8Array(await readBuffer(this.device, this.shapeBuffer));
   }
 
+  async readPoles(): Promise<Uint8Array> {
+    this.syncShape();
+    if (!this.poles) return new Uint8Array(this.width * this.height * 4);
+    return new Uint8Array(await readBuffer(this.device, this.poles));
+  }
+
   /**
    * Replaces the agent with id `index` (as readAgents() orders them), wherever the sort has put it. The id
    * stays, so ids remain unique: `a.bits` sets only the strain and the alive bit.
@@ -1141,19 +1604,22 @@ export class Simulation implements Sim {
 
   /**
    * For tests. `shape` cannot know the distances of an environment written as bytes: it is cleared, and its next use
-   * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`.
+   * holds it to `env` (syncShape()), so the sign of every outline byte, the light and the shadow follow `env`. So with
+   * the outline distances of the electrodes, which the simulation holds while the bytes hold a pole.
    */
   writeEnv(data: Uint8Array) {
     this.changed();
     this.revision++;
     this.device.queue.writeBuffer(this.env, 0, data);
-    const enc = this.device.createCommandEncoder();
-    enc.clearBuffer(this.shapeBuffer);
-    this.device.queue.submit([enc.finish()]);
     this.walls = data.some((v, i) => i % 4 === 0 && v > 0);
     this.wallOverAgents = this.walls;
     this.hasEnvironment = data.some((v) => v > 0);
     this.hasElectrodes = data.some((v, i) => i % 4 === 3 && v > 0);
+    if (!this.hasElectrodes) this.dropPoles();
+    const enc = this.device.createCommandEncoder();
+    enc.clearBuffer(this.shapeBuffer);
+    if (this.hasElectrodes) enc.clearBuffer(this.ensurePoles());
+    this.device.queue.submit([enc.finish()]);
     this.sources = data.some((v, i) => i % 4 !== 0 && v > 0);
     if (this.sources) this.scentless = false;
     this.shapeHeld = undefined;
@@ -1166,10 +1632,15 @@ export class Simulation implements Sim {
     for (const b of [this.params, this.paintParams, this.brushes, ...this.agentBuffers, this.tiles, this.replacement])
       b.destroy();
     for (const b of [this.counts, this.env, this.shapeBuffer, this.stats, this.walled, this.clearance]) b.destroy();
+    this.dropPoles();
     this.viewThird?.trail.destroy();
     this.viewThird?.scent.destroy();
     this.dropFlow();
     this.dropTubes();
+    this.dropStream();
+    this.dropSlime();
+    // The territory and the sinks of the rules of stage 4 (ADR 0068, ADR 0069).
+    this.dropTerritory();
     const g = this.growth;
     if (g)
       for (const b of [g.rows, g.windows, g.claims, g.births, g.cellSums, g.dead, g.deadSums, ...g.levels]) b.destroy();
@@ -1217,6 +1688,19 @@ export class Simulation implements Sim {
     if (growth && tests.grow) {
       enc.clearBuffer(growth.claims);
       enc.clearBuffer(growth.births);
+      // The marks of the paid parents of `rank` for `jones` (growth.wgsl, ADR 0100), before `win` writes it.
+      if (territoryOn(this.settings)) enc.clearBuffer(growth.dead);
+    }
+    // The rules of stage 4 (ADR 0068): the agent passes and growth read the territory of the step before, the owners
+    // pass fills the owners anew, and the push writes the next territory.
+    const territory = col && territoryOn(this.settings) ? this.ensureTerritory() : undefined;
+    if (territory) enc.clearBuffer(territory.owners);
+    // The sinks of each strain (ADR 0069): the atomics of the step add their sums from 0, and so the counts of the paid
+    // births (ADR 0071).
+    const sinks = territory ? this.ensureSinks() : undefined;
+    if (sinks) {
+      enc.clearBuffer(sinks.sums);
+      enc.clearBuffer(sinks.state, PAID_COUNTS_BYTE, PAID_COUNTS_BYTES);
     }
     let pass = enc.beginComputePass();
     if (sort) this.encodeSort(pass);
@@ -1232,12 +1716,26 @@ export class Simulation implements Sim {
     // With the flow in the tubes, the passes in which agents starve and come to life by the flow memory (agents.wgsl
     // `//#if FLOW`, ADR 0029): they read the memory of the step before, each agent the layer of its strain (ADR 0031).
     const flow = flowOn(this.settings) ? this.ensureFlow() : undefined;
+    // The block of each strain holds the constants of stage 4 after its sites (packTerritory(); ADR 0067, decision 9).
     flow?.uniforms.forEach((block, strain) => {
-      this.device.queue.writeBuffer(block, 0, packFlow(this.settings, this.sites, this.flowData, strain));
+      const data = packTerritory(packFlow(this.settings, this.sites, this.flowData, strain), this.settings);
+      this.device.queue.writeBuffer(block, 0, data);
     });
-    const flowing = flow ? k.flowing(senseWalls, saturate) : undefined;
+    // With the rules of stage 4, the passes of the flow with the lines of the territory (agents.wgsl `//#if TERRITORY`).
+    const flowing = flow ? k.flowing(senseWalls, saturate, territory !== undefined) : undefined;
     const fm = this.flowM;
-    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${flow ? `flow${fm}` : ''}`;
+    const tt = this.territoryT;
+    const held = flow ? `flow${fm}${territory ? `terr${tt}` : ''}` : '';
+    const w = `${senseWalls ? 1 : 0}${saturate ? 1 : 0}${this.scentless ? 1 : 0}${held}`;
+    const territoryView = territory ? territory.views[tt] : null;
+    // With the rules of stage 4 the sensors of `claim` read the pressure of the flow of the step before, every layer
+    // (agents.wgsl `//#if TERRITORY`, ADR 0070): the key names the texture that holds it. And what the sink of each
+    // cell takes over its conductivity, which `takes` writes first from the flow of the step before (ADR 0075): the
+    // group holds a texture of the sinks, which dropSinks() forgets with the key.
+    const pressures = territory && flow ? at(flow.pressureArrays, this.flowP) : null;
+    const takes = pressures && sinks ? sinks.takeArray : null;
+    const pressureKey = pressures ? `p${String(this.flowP)}-sinks` : '';
+    if (flow && sinks && takes) this.encodeTakes(pass, flow, sinks);
     const agentPasses = flowing ?? (saturate ? k.saturated(senseWalls) : senseWalls ? k.walled() : k);
     // The agent passes read only the constants of the block, which every strain has: the block of the first strain.
     const [flowMemory, flowUniform] = flow ? [at(flow.memoryArrays, fm), at(flow.uniforms, 0)] : [null, null];
@@ -1278,7 +1776,7 @@ export class Simulation implements Sim {
       pass.setPipeline(claim);
       pass.setBindGroup(
         0,
-        this.bind(`claim${p}${q}${a}${w}`, claim, [
+        this.bind(`claim${p}${q}${a}${w}${pressureKey}`, claim, [
           this.params,
           this.agentBuffer,
           trail,
@@ -1293,13 +1791,32 @@ export class Simulation implements Sim {
           this.clearance,
           flowMemory,
           flowUniform,
+          territoryView,
+          pressures,
+          takes,
+          sinks ? sinks.state : null,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
+      // With the rules of stage 4 the respawns that `claim` counted claim their cells with the chance that the budget
+      // gives (agents.wgsl `pay`, ADR 0100): the group holds the state of the sinks, which dropSinks() forgets with it.
+      // Then those that came to life cost one each (`reborn`).
+      if (flowing?.pay && flowing.reborn && sinks) {
+        const resources = [this.params, this.agentBuffer, null, null, this.env, null, null, occ, col.claims];
+        const more = [null, null, null, flowMemory, flowUniform, territoryView, null, null, sinks.state];
+        for (const [name, pipeline] of [
+          ['pay', flowing.pay],
+          ['reborn', flowing.reborn],
+        ] as const) {
+          pass.setPipeline(pipeline);
+          pass.setBindGroup(0, this.bind(`${name}${q}${a}${held}-sinks`, pipeline, [...resources, ...more]));
+          pass.dispatchWorkgroups(...this.groups);
+        }
+      }
       // Without the flow one `settle` serves every variant of the agent passes. With the flow each variant has its
       // own (Kernels.flowing()), so the key names the variant, as the keys of `move` and `claim` do.
       const settle = flowing?.settle ?? k.settle;
-      const settleKey = flow ? `flow${fm}${senseWalls ? 1 : 0}${saturate ? 1 : 0}` : '';
+      const settleKey = flow ? `${held}${senseWalls ? 1 : 0}${saturate ? 1 : 0}` : '';
       pass.setPipeline(settle);
       pass.setBindGroup(
         0,
@@ -1318,11 +1835,15 @@ export class Simulation implements Sim {
           this.clearance,
           flowMemory,
           flowUniform,
+          territoryView,
         ]),
       );
       pass.dispatchWorkgroups(...this.groups);
       this.occParity = flip(q);
-      if (growth) pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform);
+      if (growth)
+        pass = this.encodeGrowth(enc, pass, growth, tests.grow, flowMemory, flowUniform, territoryView, sinks);
+      // The owners after the moves and the births of the step (territory.wgsl `fillOwners`).
+      if (territory) this.encodeOwners(pass, territory);
     }
     let d = p;
     // The pass that adds the step's sources (diffuse.wgsl): the last moving first, the first sensing first (ADR 0027);
@@ -1337,9 +1858,316 @@ export class Simulation implements Sim {
       pass.dispatchWorkgroups(Math.ceil(this.width / TILE), Math.ceil(this.height / TILE));
       d = flip(d);
     }
-    if (flow) this.encodeFlow(pass, flow, d);
+    // The stamps of the slime field, from the trail after the step's diffusion, while the slime has a life time.
+    if (slimeSteps(this.settings) > 0) this.encodeSlime(pass, d);
+    if (flow) this.encodeFlow(pass, flow, d, territory && sinks ? { territory, sinks } : undefined);
+    // The push last (ADR 0067, decision 6): the territory of the next step.
+    if (territory && flowUniform) this.encodePush(pass, territory, flowUniform);
     pass.end();
     this.parity = d;
+  }
+
+  /** The owners of every cell from the agents after the moves and the births (territory.wgsl `fillOwners`). */
+  private encodeOwners(pass: GPUComputePassEncoder, territory: TerritoryState) {
+    const fill = this.kernels.territoryPasses().fillOwners;
+    pass.setPipeline(fill);
+    const resources = [this.params, this.agentBuffer, null, territory.owners];
+    pass.setBindGroup(0, this.bind(`terrOwners${this.agentParity}`, fill, resources));
+    pass.dispatchWorkgroups(...this.groups);
+  }
+
+  /**
+   * The push (territory.wgsl `push`): the next territory from the current one and the owners, with the chances in the
+   * block of the flow. The next copy becomes the current one.
+   */
+  private encodePush(pass: GPUComputePassEncoder, territory: TerritoryState, flowUniform: GPUBuffer) {
+    const push = this.kernels.territoryPasses().push;
+    const t = this.territoryT;
+    pass.setPipeline(push);
+    const resources = [this.params, null, this.env, territory.owners, territory.views[t], territory.views[flip(t)]];
+    // The group holds a block of the flow: dropFlow() forgets it with the other groups of the flow.
+    pass.setBindGroup(0, this.bind(`terrPush${t}-flow`, push, [...resources, flowUniform]));
+    pass.dispatchWorkgroups(...this.territoryGroups);
+    this.territoryT = flip(t);
+  }
+
+  /** Workgroups of 8 × 8 over the texels of the territory, 4 cells to a texel (territory.wgsl). */
+  private get territoryGroups(): [number, number] {
+    return [Math.ceil(Math.ceil(this.width / 4) / 8), Math.ceil(this.height / 8)];
+  }
+
+  /**
+   * The textures of the territory and the buffer of the owners, made at their first use while the rules of stage 4
+   * run (sizing.ts TERRITORY_BYTES_PER_CELL). New textures and buffers hold zeros: no cell lies in a territory.
+   */
+  private ensureTerritory(): TerritoryState {
+    if (!this.territory) {
+      const usage =
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.STORAGE_BINDING |
+        GPUTextureUsage.RENDER_ATTACHMENT |
+        GPUTextureUsage.COPY_SRC |
+        GPUTextureUsage.COPY_DST;
+      const make = () =>
+        this.device.createTexture({ size: [Math.ceil(this.width / 4), this.height], format: 'r32uint', usage });
+      const textures: Pair<GPUTexture> = [make(), make()];
+      this.territory = {
+        textures,
+        views: [textures[0].createView(), textures[1].createView()],
+        owners: this.device.createBuffer({
+          size: Math.ceil((this.width * this.height) / 4) * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        }),
+        disc: this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+      };
+      this.territoryT = 0;
+    }
+    return this.territory;
+  }
+
+  /** Clears both copies of the territory and the owners: no cell lies in a territory, and none holds an owner. */
+  private clearTerritory(enc: GPUCommandEncoder, territory: TerritoryState) {
+    for (const view of territory.views) {
+      const clearValue = [0, 0, 0, 0];
+      enc.beginRenderPass({ colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue }] }).end();
+    }
+    enc.clearBuffer(territory.owners);
+    this.territoryT = 0;
+  }
+
+  /** Frees the territory and the owners, and every bind group that holds them; with them the sinks. */
+  private dropTerritory() {
+    this.dropSinks();
+    if (!this.territory) return;
+    for (const t of this.territory.textures) t.destroy();
+    this.territory.owners.destroy();
+    this.territory.disc.destroy();
+    this.territory = undefined;
+    for (const key of [...this.bindCache.keys()]) if (key.includes('terr')) this.bindCache.delete(key);
+  }
+
+  /**
+   * The buffers of the sinks, made at their first use while the rules of stage 4 run (sizing.ts SINK_BYTES_PER_CELL),
+   * for the strains of the settings: settings with another number of strains get new buffers, as the flow gets a new
+   * state (ensureFlow()). New buffers hold zeros: no cell was a sink.
+   */
+  private ensureSinks(): SinkState {
+    const strains = flowStrains(this.settings);
+    if (this.sinks && this.sinks.strains !== strains) this.dropSinks();
+    if (!this.sinks) {
+      const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+      const make = (size: number) => this.device.createBuffer({ size, usage });
+      // What the sensors read of the sinks (ADR 0075): a pass writes every texel of it before a step reads it.
+      const takes = this.device.createTexture({
+        size: [this.width, this.height, strains],
+        format: 'r32float',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+      });
+      this.sinks = {
+        strains,
+        rates: make(this.width * this.height * strains * 4),
+        sums: make(SINK_SUM_WORDS * strains * 4),
+        // The state of every strain, the counts of the paid births and a key per agent (ADR 0071).
+        state: make(PAID_KEYS_BYTE + this.agents * 4),
+        takes,
+        takeViews: Array.from({ length: strains }, (_, strain) =>
+          takes.createView({ dimension: '2d', baseArrayLayer: strain, arrayLayerCount: 1 }),
+        ),
+        takeArray: takes.createView({ dimension: '2d-array' }),
+      };
+    }
+    return this.sinks;
+  }
+
+  /** Frees the buffers and the texture of the sinks, and every bind group that holds them. */
+  private dropSinks() {
+    if (!this.sinks) return;
+    for (const b of [this.sinks.rates, this.sinks.sums, this.sinks.state]) b.destroy();
+    this.sinks.takes.destroy();
+    this.sinks = undefined;
+    for (const key of [...this.bindCache.keys()]) if (key.includes('sinks')) this.bindCache.delete(key);
+  }
+
+  /**
+   * The sinks of a strain and its state (sinks.wgsl, ADR 0069), after the update of its flow and before its pressure:
+   * `uniform` is the block of the strain, `memory` its memory after the update.
+   */
+  private encodeSinks(
+    pass: GPUComputePassEncoder,
+    stage4: { territory: TerritoryState; sinks: SinkState },
+    strain: number,
+    uniform: GPUBuffer,
+    memory: GPUTextureView,
+    ports: GPUBuffer,
+    groups: readonly [number, number],
+  ) {
+    const passes = this.kernels.sinkPasses();
+    const { territory, sinks } = stage4;
+    const t = this.territoryT;
+    const next = flip(this.flowM);
+    pass.setPipeline(passes.sinks);
+    // The group holds the slime field, the territory, a block and the ports of the flow: dropSlime(), dropTerritory()
+    // and dropFlow() forget it, and dropSinks() too.
+    pass.setBindGroup(
+      0,
+      this.bind(`slime-sinks${strain}-${next}-terr${t}-flow`, passes.sinks, [
+        ...[this.params, uniform, this.env, territory.owners, territory.views[t], this.ensureSlime().stamps, memory],
+        // The ports of the step: the test of the tube of a sink (ADR 0072).
+        ...[sinks.rates, sinks.sums, ports],
+      ]),
+    );
+    pass.dispatchWorkgroups(...groups);
+    pass.setPipeline(passes.state);
+    // The state reads the step and the test of growth in the parameters: the budget of the paid births (ADR 0071).
+    const state = [this.params, uniform, null, null, null, null, null, null, sinks.sums, ports, sinks.state];
+    pass.setBindGroup(0, this.bind(`sinks-state${strain}-flow`, passes.state, state));
+    pass.dispatchWorkgroups(1);
+  }
+
+  /**
+   * What the sink of each cell takes over the conductivity of the cell, for the sensors of the agent passes (flow.wgsl
+   * `takes`, ADR 0075), at the start of a step: per strain, with its block, from its memory, the rates and the state as
+   * the flow of the step before left them.
+   */
+  private encodeTakes(pass: GPUComputePassEncoder, flow: FlowState, sinks: SinkState) {
+    const takes = this.kernels.flowSinkPasses().takes;
+    const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
+    const m = this.flowM;
+    pass.setPipeline(takes);
+    for (let strain = 0; strain < flow.strains; strain++) {
+      const read = [this.params, at(flow.uniforms, strain), null, null, at(flow.memoryViews, strain)[m]];
+      const between = [null, null, null, null, null, null, null, null];
+      const resources = [...read, ...between, sinks.rates, sinks.state, at(sinks.takeViews, strain)];
+      // The group holds a block and a memory of the flow and the buffers of the sinks: dropFlow() and dropSinks()
+      // forget it.
+      pass.setBindGroup(0, this.bind(`flowTakes${strain}-${m}-sinks`, takes, resources));
+      pass.dispatchWorkgroups(...groups);
+    }
+  }
+
+  /**
+   * For tests: the sink rate of every cell for a strain (Sim.readSinks()), with a minus sign where the cell was a sink
+   * in the last step. Only zeros while the rules of stage 4 do not run, and for a strain that the settings do not hold.
+   */
+  async readSinks(strain = 0): Promise<Float32Array> {
+    const n = this.width * this.height;
+    if (!this.sinks || strain >= this.sinks.strains) return new Float32Array(n);
+    const all = new Float32Array(await readBuffer(this.device, this.sinks.rates));
+    return all.slice(strain * n, (strain + 1) * n);
+  }
+
+  /** For tests: the sums of each strain of the last step, R low, R high, C and N (Sim.readSinkSums()). */
+  async readSinkSums(): Promise<Uint32Array> {
+    if (!this.sinks) return new Uint32Array(SINK_SUM_WORDS * flowStrains(this.settings));
+    return new Uint32Array(await readBuffer(this.device, this.sinks.sums));
+  }
+
+  /** For tests: the state of each strain of the last step, SINK_STATE_LANES floats (Sim.readSinkState()). */
+  async readSinkState(): Promise<Float32Array> {
+    if (!this.sinks) return new Float32Array(SINK_STATE_LANES * flowStrains(this.settings));
+    const all = new Float32Array(await readBuffer(this.device, this.sinks.state));
+    return all.slice(0, SINK_STATE_LANES * this.sinks.strains);
+  }
+
+  /**
+   * For tests: replaces the state of each strain, SINK_STATE_LANES floats per strain as readSinkState() returns them,
+   * while the rules of stage 4 run (Sim.writeSinkState()).
+   */
+  writeSinkState(data: Float32Array) {
+    if (!territoryOn(this.settings)) return;
+    const sinks = this.ensureSinks();
+    this.device.queue.writeBuffer(sinks.state, 0, data.subarray(0, SINK_STATE_LANES * sinks.strains));
+  }
+
+  /**
+   * For tests: the keys of the births that the flux pays of the last growth step (Sim.readPaidKeys()), one float per
+   * agent by its id, paid.ts NO_KEY for an agent without a key. Empty while the rules of stage 4 do not run.
+   */
+  async readPaidKeys(): Promise<Float32Array> {
+    if (!this.sinks) return new Float32Array(0);
+    const all = new Float32Array(await readBuffer(this.device, this.sinks.state));
+    return all.slice(PAID_KEYS_BYTE / 4, PAID_KEYS_BYTE / 4 + this.agents);
+  }
+
+  /** For tests: the counts of the last step that settle the budget (Sim.readPaidCounts(); ADR 0100). */
+  async readPaidCounts(): Promise<Uint32Array> {
+    const strains = flowStrains(this.settings);
+    if (!this.sinks) return new Uint32Array(PAID_COUNT_LANES * strains);
+    const all = new Uint32Array(await readBuffer(this.device, this.sinks.state));
+    return all.slice(PAID_COUNTS_BYTE / 4, PAID_COUNTS_BYTE / 4 + PAID_COUNT_LANES * this.sinks.strains);
+  }
+
+  /** For tests: replaces the sink rates of a strain, one float per cell (Sim.writeSinks()), while the rules run. */
+  writeSinks(data: Float32Array, strain = 0) {
+    if (!territoryOn(this.settings)) return;
+    const sinks = this.ensureSinks();
+    if (strain >= sinks.strains) return;
+    this.device.queue.writeBuffer(sinks.rates, strain * this.width * this.height * 4, data);
+  }
+
+  /**
+   * The start territory (Sim.addTerritory(); territory.wgsl `addDisc`): the open cells within `radius` cells of
+   * (x, y) join the territory of `strain`. Nothing while the rules of stage 4 do not run.
+   */
+  addTerritory(strain: number, x: number, y: number, radius: number) {
+    if (!territoryOn(this.settings)) return;
+    const territory = this.ensureTerritory();
+    const t = this.territoryT;
+    this.writeParams();
+    this.device.queue.writeBuffer(territory.disc, 0, new Float32Array([x, y, radius, strain]));
+    const add = this.kernels.territoryPasses().addDisc;
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(add);
+    const resources = [this.params, null, this.env, null, territory.views[t], territory.views[flip(t)]];
+    pass.setBindGroup(0, this.bind(`terrDisc${t}`, add, [...resources, null, territory.disc]));
+    pass.dispatchWorkgroups(...this.territoryGroups);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.territoryT = flip(t);
+  }
+
+  /** For tests and measurements: the territory, one byte per cell (Sim.readTerritory()). */
+  async readTerritory(): Promise<Uint8Array> {
+    const cells = new Uint8Array(this.width * this.height);
+    if (!this.territory) return cells;
+    // A texel holds the bytes of its 4 cells in their order.
+    const bytes = await readPixels(this.device, at(this.territory.textures, this.territoryT));
+    const row = Math.ceil(this.width / 4) * 4;
+    for (let y = 0; y < this.height; y++) cells.set(bytes.subarray(y * row, y * row + this.width), y * this.width);
+    return cells;
+  }
+
+  /** For tests: the owners of the last step, one byte per cell (Sim.readOwners()). */
+  async readOwners(): Promise<Uint8Array> {
+    if (!this.territory) return new Uint8Array(this.width * this.height);
+    const bytes = new Uint8Array(await readBuffer(this.device, this.territory.owners));
+    return bytes.slice(0, this.width * this.height);
+  }
+
+  /** For tests: replaces the territory, one byte per cell (Sim.writeTerritory()), while the rules of stage 4 run. */
+  writeTerritory(data: Uint8Array) {
+    if (!territoryOn(this.settings)) return;
+    const territory = this.ensureTerritory();
+    const row = Math.ceil(this.width / 4) * 4;
+    const padded = new Uint8Array(row * this.height);
+    for (let y = 0; y < this.height; y++) padded.set(data.subarray(y * this.width, (y + 1) * this.width), y * row);
+    const texture = at(territory.textures, this.territoryT);
+    this.device.queue.writeTexture({ texture }, padded, { bytesPerRow: row }, [row / 4, this.height]);
+  }
+
+  /**
+   * The pass of the stamps after the diffusion of a step (slime.wgsl, ADR 0055): a cell that holds plasm gets the
+   * stamp of the step. `trail`: the texture that holds the trail after the step, as the flow reads it (encodeFlow()).
+   */
+  private encodeSlime(pass: GPUComputePassEncoder, trail: Bit) {
+    this.stamped = true;
+    const stamp = this.kernels.slime();
+    pass.setPipeline(stamp);
+    const field = this.ensureSlime();
+    const resources = [this.params, this.trailViews[trail], field.stamps, field.amounts, field.fronts];
+    pass.setBindGroup(0, this.bind(`slime${trail}`, stamp, resources));
+    pass.dispatchWorkgroups(Math.ceil(this.width / SLIME_GROUP), Math.ceil(this.height / SLIME_GROUP));
   }
 
   /**
@@ -1348,8 +2176,20 @@ export class Simulation implements Sim {
    * that holds the trail after the step. Once per strain, each with its own layers and its own block (ADR 0031): the
    * passes of a strain read no state of another strain.
    */
-  private encodeFlow(pass: GPUComputePassEncoder, flow: FlowState, trail: Bit) {
-    const passes = this.kernels.flowPasses();
+  private encodeFlow(
+    pass: GPUComputePassEncoder,
+    flow: FlowState,
+    trail: Bit,
+    stage4?: { territory: TerritoryState; sinks: SinkState },
+  ) {
+    // While the rules of stage 4 run, the update and the pressure that take the sinks (flow.wgsl `//#if TERRITORY`, ADR
+    // 0070): they bind the state of the sinks, and the pressure their rates. Their groups hold buffers of the sinks:
+    // dropSinks() forgets them. Over 8 neighbours (`//#if EIGHT`, ADR 0086), the update and the pressure of that
+    // variant: the key of a group names it, since a group of an 'auto' layout belongs to its pipeline.
+    const eight = flowEight(this.settings);
+    const passes = this.kernels.flowPasses(stage4 !== undefined, eight);
+    const taking = stage4 ? [null, null, stage4.sinks.rates, stage4.sinks.state] : [];
+    const taken = `${stage4 ? '-sinks' : ''}${eight ? '-e8' : ''}`;
     const groups = [Math.ceil(this.width / FLOW_GROUP), Math.ceil(this.height / FLOW_GROUP)] as const;
     const [m, next] = [this.flowM, flip(this.flowM)];
     let p = this.flowP;
@@ -1386,7 +2226,7 @@ export class Simulation implements Sim {
       pass.setPipeline(passes.update);
       pass.setBindGroup(
         0,
-        this.bind(`flowUpdate${strain}-${m}${p}${trail}`, passes.update, [
+        this.bind(`flowUpdate${strain}-${m}${p}${trail}${taken}`, passes.update, [
           this.params,
           uniform,
           this.trailViews[trail],
@@ -1398,9 +2238,13 @@ export class Simulation implements Sim {
           null,
           null,
           flow.ports,
+          // The update reads only the state: whether the front took flux in the step before.
+          ...(stage4 ? [null, null, null, stage4.sinks.state] : []),
         ]),
       );
       pass.dispatchWorkgroups(...groups);
+      // While the rules of stage 4 run, the sinks of the strain from its memory after the update (ADR 0069).
+      if (stage4) this.encodeSinks(pass, stage4, strain, uniform, memory[next], flow.ports, groups);
       for (let i = 0; i < FLOW_ITERATIONS; i++) {
         // The first two iterations take the pressure of the reference cell off (flow.wgsl RECENTRE).
         const pipeline = at(passes.pressure, Math.min(i, 2) === 2 ? 0 : i + 1);
@@ -1408,7 +2252,7 @@ export class Simulation implements Sim {
         pass.setPipeline(pipeline);
         pass.setBindGroup(
           0,
-          this.bind(`flowPressure${strain}-${Math.min(i, 2)}${next}${p}`, pipeline, [
+          this.bind(`flowPressure${strain}-${Math.min(i, 2)}${next}${p}${taken}`, pipeline, [
             this.params,
             uniform,
             null,
@@ -1420,6 +2264,7 @@ export class Simulation implements Sim {
             at(pressure, out),
             null,
             flow.ports,
+            ...taking,
           ]),
         );
         pass.dispatchWorkgroups(...groups);
@@ -1443,13 +2288,18 @@ export class Simulation implements Sim {
     grow: boolean,
     flowMemory: GPUTextureView | null,
     flowUniform: GPUBuffer | null,
+    territory: GPUTextureView | null,
+    sinks: SinkState | undefined,
   ) {
     // With the flow in the tubes, the passes in which an agent on a starved cell does not divide and no child is born
     // onto one (growth.wgsl `//#if FLOW`, ADR 0029 and ADR 0053): they read the flow memory that the agent passes of
-    // the step read.
+    // the step read. With the rules of stage 4 also the territory that they read (`//#if TERRITORY`, ADR 0068), and the
+    // sink rates and the state of the sinks for the births that the flux pays (ADR 0071): their groups hold buffers of
+    // the sinks, which dropSinks() forgets with the key.
     const flow = flowMemory !== null;
-    const k = this.kernels.growth(flow);
-    const f = flow ? `flow${this.flowM}` : '';
+    const paid = territory !== null && sinks !== undefined;
+    const k = this.kernels.growth(flow, territory !== null);
+    const f = flow ? `flow${this.flowM}${territory ? `terr${this.territoryT}${paid ? '-sinks' : ''}` : ''}` : '';
     const a = this.agentParity;
     const moved = this.occParity;
     const after = this.ensureCollision().occ[moved];
@@ -1473,11 +2323,17 @@ export class Simulation implements Sim {
     ];
     // An 'auto' layout holds only the bindings that its entry point uses (GROWTH_BINDINGS).
     const used = (name: keyof GrowthKernels, extra: GPUBuffer | null = null) => {
-      const bindings = flow ? [...GROWTH_BINDINGS[name], ...GROWTH_FLOW_BINDINGS[name]] : GROWTH_BINDINGS[name];
-      return [...resources, extra, flowMemory, flowUniform].map((r, i) => (bindings.includes(i) ? r : null));
+      const bindings = [
+        ...GROWTH_BINDINGS[name],
+        ...(flow ? GROWTH_FLOW_BINDINGS[name] : []),
+        ...(territory ? GROWTH_TERRITORY_BINDINGS[name] : []),
+      ].filter((b) => !territory || !(GROWTH_TERRITORY_UNUSED[name] ?? []).includes(b));
+      const stage4 = [flowMemory, flowUniform, territory, sinks?.rates ?? null, sinks?.state ?? null];
+      return [...resources, extra, ...stage4].map((r, i) => (bindings.includes(i) ? r : null));
     };
     const run = (name: keyof GrowthKernels, groups: [number, number]) => {
       const pipeline = k[name];
+      if (!pipeline) throw new Error(`No pass ${name} of growth`);
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, this.bind(`grow-${name}${a}${moved}${f}`, pipeline, used(name)));
       pass.dispatchWorkgroups(...groups);
@@ -1486,6 +2342,10 @@ export class Simulation implements Sim {
     run('windowSums', cellGroups);
     run('test', this.groups);
     if (grow) {
+      // The rank of the births that the flux pays, after the keys of `test` (ADR 0071); then the parents of Jones' rule
+      // that the budget pays (ADR 0100).
+      if (paid) run('rank', this.groups);
+      if (paid) run('jones', this.groups);
       run('win', this.groups);
       const build = (name: 'buildCells' | 'buildDead', n: number) => {
         const pipeline = k[name];
@@ -1651,11 +2511,16 @@ interface Starts {
   settleStart: GPUComputePipeline;
 }
 
-/** The bindings that each pass of growth.wgsl uses: the 'auto' layout of its pipeline holds only these. */
+/**
+ * The bindings that each pass of growth.wgsl uses: the 'auto' layout of its pipeline holds only these. `rank` runs
+ * only with the rules of stage 4.
+ */
 export const GROWTH_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
   rowSums: [0, 3, 5],
   windowSums: [0, 5, 6],
   test: [0, 1, 2, 3, 4, 6, 7],
+  rank: [0, 1, 2, 3, 4, 6, 7, 10],
+  jones: [0, 1, 2, 3, 4, 6, 7, 10],
   win: [0, 1, 2, 3, 4, 6, 7, 8, 10],
   buildCells: [0, 8, 9, 14],
   buildDead: [0, 10, 11, 14],
@@ -1670,21 +2535,61 @@ export const GROWTH_FLOW_BINDINGS: Record<keyof GrowthKernels, readonly number[]
   rowSums: [],
   windowSums: [],
   test: [15, 16],
+  rank: [15, 16],
+  jones: [15, 16],
   win: [15, 16],
   buildCells: [],
   buildDead: [],
   birth: [],
 };
 
-/** The passes of growth and shrinkage (growth.wgsl, ADR 0025). */
+/**
+ * The bindings that a pass of growth.wgsl uses in addition while the rules of stage 4 run (`//#if TERRITORY`): the
+ * territory, in the passes that pick the cell of a child; the sink rates and the state of the sinks with the counts
+ * and the keys of the paid births, in `test` and `rank` (ADR 0071), and the counts in `jones` and `birth` (ADR 0100).
+ */
+export const GROWTH_TERRITORY_BINDINGS: Record<keyof GrowthKernels, readonly number[]> = {
+  rowSums: [],
+  windowSums: [],
+  test: [17, 18, 19],
+  rank: [17, 19],
+  jones: [17, 19],
+  win: [17],
+  buildCells: [],
+  buildDead: [],
+  birth: [19],
+};
+
+/**
+ * The bindings that a pass of growth.wgsl no longer uses while the rules of stage 4 run: `test` claims no cell then,
+ * because every parent of Jones' rule waits for the budget (ADR 0100).
+ */
+export const GROWTH_TERRITORY_UNUSED: Partial<Record<keyof GrowthKernels, readonly number[]>> = { test: [7] };
+
+/** The passes of growth and shrinkage (growth.wgsl, ADR 0025). `rank`: only with the rules of stage 4 (ADR 0071). */
 interface GrowthKernels {
   rowSums: GPUComputePipeline;
   windowSums: GPUComputePipeline;
   test: GPUComputePipeline;
+  rank?: GPUComputePipeline;
+  jones?: GPUComputePipeline;
   win: GPUComputePipeline;
   buildCells: GPUComputePipeline;
   buildDead: GPUComputePipeline;
   birth: GPUComputePipeline;
+}
+
+/** The passes of the territory (territory.wgsl, ADR 0068). */
+interface TerritoryKernels {
+  fillOwners: GPUComputePipeline;
+  push: GPUComputePipeline;
+  addDisc: GPUComputePipeline;
+}
+
+/** The passes of the sinks (sinks.wgsl, ADR 0069). */
+interface SinkKernels {
+  sinks: GPUComputePipeline;
+  state: GPUComputePipeline;
 }
 
 /** `advance` (move) and `claim`, the agent passes that steer. */
@@ -1693,9 +2598,15 @@ interface Steering {
   claim: GPUComputePipeline;
 }
 
-/** The agent passes with the flow in the tubes (Kernels.flowing()): `settle` places agents by the flow too. */
+/**
+ * The agent passes with the flow in the tubes (Kernels.flowing()): `settle` places agents by the flow too. `pay`: with
+ * the rules of stage 4, the respawns that the budget pays, and `reborn`, which counts those that came to life (ADR
+ * 0100).
+ */
 interface Flowing extends Steering {
   settle: GPUComputePipeline;
+  pay?: GPUComputePipeline;
+  reborn?: GPUComputePipeline;
 }
 
 /** The passes of the flow in the tubes (flow.wgsl): the update, and the pressure iteration by RECENTRE (0, 1, 2). */
@@ -1706,11 +2617,15 @@ interface FlowKernels {
   pressure: GPUComputePipeline[];
 }
 
-/** The passes of the picture of the tubes (tubes.wgsl, ADR 0034). */
+/** The passes of the flow that take the sinks (ADR 0070), and `takes`, what the sensors read of the sinks (ADR 0075). */
+interface FlowSinkKernels extends FlowKernels {
+  takes: GPUComputePipeline;
+}
+
+/** The passes of the picture of the tubes (tubes.wgsl, ADR 0034). The stream of the grains is apart (ADR 0095). */
 interface TubeKernels {
   roots: GPUComputePipeline;
   picture: GPUComputePipeline;
-  stream: GPUComputePipeline;
 }
 
 /** The pipelines for an environment that may hold walls (Kernels.walled()). */
@@ -1729,8 +2644,9 @@ class Kernels {
   private readonly saturatedPipelines: [Steering?, Steering?] = [];
   /** The diffusion passes (diffuse.wgsl), by variantKey(). */
   private readonly variants = new Map<string, GPUComputePipeline>();
-  /** The outline pass (paint.wgsl `outline`), by outlineVariant(). */
-  private readonly outlinePipelines = new Map<OutlineVariant, GPUComputePipeline>();
+  /** The outline pass (paint.wgsl `outline`), by outlineVariant(), and the same on the outlines of the electrodes. */
+  private readonly outlinePipelines = new Map<string, GPUComputePipeline>();
+  private refreshPolesPipeline?: GPUComputePipeline;
   /** The last diffusion pass with covered food (diffuse.wgsl COVERED), by variantKey(). */
   private readonly coveredPipelines = new Map<string, GPUComputePipeline>();
   /** The view's diffusion passes of a step that moves first (diffuse.wgsl VIEW), by variantKey(). */
@@ -1740,11 +2656,27 @@ class Kernels {
   private capacityPipelines?: Starts;
   private growthPipelines?: GrowthKernels;
   private growthFlowPipelines?: GrowthKernels;
+  private growthTerritoryPipelines?: GrowthKernels;
+  private territoryPipelines?: TerritoryKernels;
+  private sinkPipelines?: SinkKernels;
   private flowModule?: GPUShaderModule;
+  private territoryModule?: GPUShaderModule;
   /** The agent passes with the flow in the tubes (agents.wgsl `//#if FLOW`), by walls and saturation. */
   private readonly flowingPipelines = new Map<string, Flowing>();
   private flowPipelines?: FlowKernels;
+  /** The update and the pressure of the flow with the sinks (flow.wgsl `//#if TERRITORY`, ADR 0070), and `takes`. */
+  private flowSinkPipelines?: FlowSinkKernels;
+  /** The flow over 8 neighbours (flow.wgsl `//#if EIGHT`, ADR 0086), by whether it takes the sinks. */
+  private readonly flowEightPipelines = new Map<boolean, FlowKernels>();
   private tubePipelines?: TubeKernels;
+  /** The stream of the grains (tubes.wgsl `stream`): the view draws it with the picture of the tubes or without it. */
+  private tubeStreamPipeline?: GPUComputePipeline;
+  /** The stream over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086). */
+  private tubeStreamEightPipeline?: GPUComputePipeline;
+  /** The modules of tubes.wgsl by the blocks of variant.ts in them: the passes of one source share its module. */
+  private readonly tubeModules = new Map<string, GPUShaderModule>();
+  private slimePipeline?: GPUComputePipeline;
+  private slimeBrushPipeline?: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout };
 
   private constructor(
     readonly init: GPUComputePipeline,
@@ -1775,28 +2707,39 @@ class Kernels {
    * built at their first use: every scene but the ones with the flow runs without them. Their source holds the lines
    * of the flow; the source of every other agent pass is the one of the code before.
    */
-  flowing(walls: boolean, saturate: boolean): Flowing {
-    const key = `${+walls}${+saturate}`;
+  flowing(walls: boolean, saturate: boolean, territory = false): Flowing {
+    const key = `${+walls}${+saturate}${+territory}`;
     let p = this.flowingPipelines.get(key);
     if (!p) {
-      const module = (this.flowModule ??= this.device.createShaderModule({
-        code: common + variant(this.agentsSource, ['FLOW']),
-      }));
+      // With the rules of stage 4, the source with the lines of the territory too (`//#if TERRITORY`, ADR 0068).
+      const module = territory
+        ? (this.territoryModule ??= this.device.createShaderModule({
+            code: common + variant(this.agentsSource, ['FLOW', 'TERRITORY']),
+          }))
+        : (this.flowModule ??= this.device.createShaderModule({
+            code: common + variant(this.agentsSource, ['FLOW']),
+          }));
       const constants = { ...(saturate ? { SATURATE: 1 } : {}), ...(walls ? { SENSE_WALLS: 1 } : {}) };
       const pipeline = (entryPoint: string) =>
         this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
       p = { move: pipeline('advance'), claim: pipeline('claim'), settle: pipeline('settle') };
+      if (territory) Object.assign(p, { pay: pipeline('pay'), reborn: pipeline('reborn') });
       this.flowingPipelines.set(key, p);
     }
     return p;
   }
 
-  /** The passes of the flow in the tubes (flow.wgsl), built at their first use. */
-  flowPasses(): FlowKernels {
+  /**
+   * The passes of the flow in the tubes (flow.wgsl), built at their first use. `sinks`: with the update and the pressure
+   * that take the sinks of the rules of stage 4 (`//#if TERRITORY`, ADR 0070); the passes of the ports stay the same.
+   * Without the rules the source is the one of the code before, character for character. `eight`: the update and the
+   * pressure over 8 neighbours (`//#if EIGHT`, ADR 0086).
+   */
+  flowPasses(sinks = false, eight = false): FlowKernels {
+    if (eight) return this.flowEightPasses(sinks);
+    if (sinks) return this.flowSinkPasses();
     if (!this.flowPipelines) {
-      const module = this.device.createShaderModule({ code: common + flowWgsl });
-      const pipeline = (entryPoint: string, constants: Record<string, number> = {}) =>
-        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
+      const pipeline = this.flowBuild([]);
       this.flowPipelines = {
         blocks: pipeline('blocks'),
         sites: pipeline('sites'),
@@ -1807,33 +2750,150 @@ class Kernels {
     return this.flowPipelines;
   }
 
-  /** The passes of the picture of the tubes (tubes.wgsl), built at their first use, with the numbers of tubes.ts. */
+  /**
+   * The passes of the flow with the sinks (flowPasses(true)), built at their first use, with `takes`: what the sink of
+   * each cell takes over its conductivity, for the sensors of the next step (ADR 0075).
+   */
+  flowSinkPasses(): FlowSinkKernels {
+    if (!this.flowSinkPipelines) {
+      const pipeline = this.flowBuild(['TERRITORY']);
+      this.flowSinkPipelines = {
+        ...this.flowPasses(),
+        update: pipeline('update'),
+        pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
+        takes: pipeline('takes'),
+      };
+    }
+    return this.flowSinkPipelines;
+  }
+
+  /**
+   * The update and the pressure over 8 neighbours (flow.wgsl `//#if EIGHT`, ADR 0086), built at their first use, with
+   * the sinks of the rules of stage 4 (`sinks`) or without them. The passes of the ports are those of flowPasses();
+   * `takes` reads no edge and stays that of flowSinkPasses().
+   */
+  private flowEightPasses(sinks: boolean): FlowKernels {
+    let p = this.flowEightPipelines.get(sinks);
+    if (!p) {
+      const pipeline = this.flowBuild(sinks ? ['TERRITORY', 'EIGHT'] : ['EIGHT']);
+      p = {
+        ...this.flowPasses(),
+        update: pipeline('update'),
+        pressure: [0, 1, 2].map((RECENTRE) => pipeline('pressure', { RECENTRE })),
+      };
+      this.flowEightPipelines.set(sinks, p);
+    }
+    return p;
+  }
+
+  /** The pipelines of an entry point of the source of the flow with the blocks of `names` (variant.ts). */
+  private flowBuild(names: string[]) {
+    const module = this.device.createShaderModule({ code: common + variant(flowWgsl, names) });
+    return (entryPoint: string, constants: Record<string, number> = {}) =>
+      this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint, constants } });
+  }
+
+  /**
+   * The pass of the stamps of the slime field (slime.wgsl, ADR 0055), built at its first use: a scene of the Jones
+   * model never runs it.
+   */
+  slime(): GPUComputePipeline {
+    this.slimePipeline ??= this.device.createComputePipeline({
+      layout: 'auto',
+      compute: {
+        module: this.device.createShaderModule({ code: common + amountWgsl + slimeWgsl }),
+        entryPoint: 'stamp',
+      },
+    });
+    return this.slimePipeline;
+  }
+
+  /**
+   * The brush on the slime field (slime-paint.wgsl, ADR 0055, decision 7) with the layout of its bind group, built at
+   * its first use: a stroke of the Slime tool, or an erase or a wall over a field with stamps. As in the paint pass, a
+   * dispatch picks its brush and its boundary's parameters by dynamic offset; this pass only reads `env`, and it
+   * writes the field in place of `shape`.
+   */
+  slimeBrush(): { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout } {
+    if (!this.slimeBrushPipeline) {
+      const C = GPUShaderStage.COMPUTE;
+      const layout = this.device.createBindGroupLayout({
+        entries: [
+          { binding: 0, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
+          { binding: 1, visibility: C, buffer: { type: 'read-only-storage' } },
+          { binding: 2, visibility: C, buffer: { type: 'uniform', hasDynamicOffset: true } },
+          { binding: 3, visibility: C, buffer: { type: 'storage' } },
+          { binding: 4, visibility: C, buffer: { type: 'storage' } },
+          { binding: 5, visibility: C, buffer: { type: 'storage' } },
+        ],
+      });
+      const pipeline = this.device.createComputePipeline({
+        layout: this.device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+        compute: {
+          module: this.device.createShaderModule({ code: common + brushWgsl + amountWgsl + slimePaintWgsl }),
+          entryPoint: 'paintSlime',
+        },
+      });
+      this.slimeBrushPipeline = { pipeline, layout };
+    }
+    return this.slimeBrushPipeline;
+  }
+
+  /**
+   * The passes of the picture of the tubes (tubes.wgsl), built at their first use, with the numbers of tubes.ts. The
+   * source without the lines of EIGHT is the one of the code before, character for character.
+   */
   tubes(): TubeKernels {
     if (!this.tubePipelines) {
-      const module = this.device.createShaderModule({ code: common + tubesWgsl });
-      const constants = {
-        RADIUS: TUBES.radius,
-        EDGE: TUBES.edge,
-        SHEET: TUBES.sheet,
-        SPAN: TUBES.span,
-        BODY_LOW: FLOW.bodyLow,
-        FAST: STREAM.fast,
-        TILE: TUBE_TILE,
-        WINDOW: TUBE_WINDOW,
-      };
-      // A pipeline takes only the constants that its entry point uses.
-      const pipeline = (entryPoint: string, names: (keyof typeof constants)[]) =>
-        this.device.createComputePipeline({
-          layout: 'auto',
-          compute: { module, entryPoint, constants: Object.fromEntries(names.map((n) => [n, constants[n]])) },
-        });
+      const pipeline = this.tubeBuild([]);
       this.tubePipelines = {
         roots: pipeline('roots', ['SPAN', 'BODY_LOW', 'TILE']),
         picture: pipeline('picture', ['RADIUS', 'EDGE', 'SHEET', 'TILE', 'WINDOW']),
-        stream: pipeline('stream', ['BODY_LOW', 'FAST', 'TILE']),
       };
     }
     return this.tubePipelines;
+  }
+
+  /**
+   * The stream of the grains (tubes.wgsl `stream`), built at its first use. The view draws the grains with the picture
+   * of the tubes or without it (ADR 0095): a start without the picture builds this pass alone.
+   */
+  tubeStream(): GPUComputePipeline {
+    this.tubeStreamPipeline ??= this.tubeBuild([])('stream', ['BODY_LOW', 'FAST', 'TILE']);
+    return this.tubeStreamPipeline;
+  }
+
+  /**
+   * The stream of the grains over 8 neighbours (tubes.wgsl `//#if EIGHT`, ADR 0086), as the flow then runs, built at
+   * its first use. It also binds the wall bytes (binding 2).
+   */
+  tubeStreamEight(): GPUComputePipeline {
+    this.tubeStreamEightPipeline ??= this.tubeBuild(['EIGHT'])('stream', ['BODY_LOW', 'FAST', 'TILE']);
+    return this.tubeStreamEightPipeline;
+  }
+
+  /** The pipelines of an entry point of tubes.wgsl with the blocks of `names` (variant.ts) and the numbers of tubes.ts. */
+  private tubeBuild(names: string[]) {
+    const key = names.join(' ');
+    const module =
+      this.tubeModules.get(key) ?? this.device.createShaderModule({ code: common + variant(tubesWgsl, names) });
+    this.tubeModules.set(key, module);
+    const constants = {
+      RADIUS: TUBES.radius,
+      EDGE: TUBES.edge,
+      SHEET: TUBES.sheet,
+      SPAN: TUBES.span,
+      BODY_LOW: FLOW.bodyLow,
+      FAST: STREAM.fast,
+      TILE: TUBE_TILE,
+      WINDOW: TUBE_WINDOW,
+    };
+    // A pipeline takes only the constants that its entry point uses.
+    return (entryPoint: string, keys: (keyof typeof constants)[]) =>
+      this.device.createComputePipeline({
+        layout: 'auto',
+        compute: { module, entryPoint, constants: Object.fromEntries(keys.map((n) => [n, constants[n]])) },
+      });
   }
 
   /**
@@ -1861,13 +2921,15 @@ class Kernels {
    * `flow`: with the lines of the flow in the tubes (`//#if FLOW`, ADR 0029); without them the source is the one of
    * the code before.
    */
-  growth(flow: boolean): GrowthKernels {
-    const built = flow ? this.growthFlowPipelines : this.growthPipelines;
+  growth(flow: boolean, territory = false): GrowthKernels {
+    const built = territory ? this.growthTerritoryPipelines : flow ? this.growthFlowPipelines : this.growthPipelines;
     if (built) return built;
-    const module = this.device.createShaderModule({ code: common + variant(growthWgsl, flow ? ['FLOW'] : []) });
+    // The rules of stage 4 run only with the flow (territory.ts territoryOn()): their lines come with those of the flow.
+    const names = territory ? ['FLOW', 'TERRITORY'] : flow ? ['FLOW'] : [];
+    const module = this.device.createShaderModule({ code: common + variant(growthWgsl, names) });
     const pipeline = (entryPoint: string) =>
       this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
-    const pipelines = {
+    const pipelines: GrowthKernels = {
       rowSums: pipeline('rowSums'),
       windowSums: pipeline('windowSums'),
       test: pipeline('test'),
@@ -1876,9 +2938,40 @@ class Kernels {
       buildDead: pipeline('buildDead'),
       birth: pipeline('birth'),
     };
-    if (flow) this.growthFlowPipelines = pipelines;
+    // The rank of the births that the flux pays (ADR 0071): its entry point is in the source only with the rules.
+    if (territory) pipelines.rank = pipeline('rank');
+    // The parents of Jones' rule that the budget pays (ADR 0100): with the rules only, too.
+    if (territory) pipelines.jones = pipeline('jones');
+    if (territory) this.growthTerritoryPipelines = pipelines;
+    else if (flow) this.growthFlowPipelines = pipelines;
     else this.growthPipelines = pipelines;
     return pipelines;
+  }
+
+  /** The passes of the territory (territory.wgsl, ADR 0068), built at their first use: one scene has them (ADR 0087). */
+  territoryPasses(): TerritoryKernels {
+    if (!this.territoryPipelines) {
+      const module = this.device.createShaderModule({ code: common + territoryWgsl });
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+      this.territoryPipelines = {
+        fillOwners: pipeline('fillOwners'),
+        push: pipeline('push'),
+        addDisc: pipeline('addDisc'),
+      };
+    }
+    return this.territoryPipelines;
+  }
+
+  /** The passes of the sinks (sinks.wgsl, ADR 0069), built at their first use: one scene has them (ADR 0087). */
+  sinkPasses(): SinkKernels {
+    if (!this.sinkPipelines) {
+      const module = this.device.createShaderModule({ code: common + sinksWgsl });
+      const pipeline = (entryPoint: string) =>
+        this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint } });
+      this.sinkPipelines = { sinks: pipeline('sinks'), state: pipeline('state') };
+    }
+    return this.sinkPipelines;
   }
 
   /**
@@ -2027,17 +3120,32 @@ class Kernels {
   /**
    * The outline pass of a segment (paint.wgsl `outline`, outlineVariant()), built at its first use (ADR 0049): food
    * and light take another variant than walls and the eraser, and a scene without shapes paints none at its start.
+   * `poles`: the pass on the outlines of the electrodes (POLES), which a scene without a pole never builds.
    */
-  outline(v: OutlineVariant): GPUComputePipeline {
-    let p = this.outlinePipelines.get(v);
+  outline(v: OutlineVariant, poles = false): GPUComputePipeline {
+    const key = poles ? `${v}Poles` : v;
+    let p = this.outlinePipelines.get(key);
     if (!p) {
+      const constants = poles ? { ...OUTLINE_CONSTANTS[v], POLES: 1 } : OUTLINE_CONSTANTS[v];
       p = this.device.createComputePipeline({
         layout: this.device.createPipelineLayout({ bindGroupLayouts: [this.paintLayout] }),
-        compute: { module: this.brush, entryPoint: 'outline', constants: OUTLINE_CONSTANTS[v] },
+        compute: { module: this.brush, entryPoint: 'outline', constants },
       });
-      this.outlinePipelines.set(v, p);
+      this.outlinePipelines.set(key, p);
     }
     return p;
+  }
+
+  /**
+   * The pass that holds the outlines of the electrodes to `env` (paint.wgsl `refresh` with POLES), built at its first
+   * use: after a change of boundary in a scene with a pole.
+   */
+  refreshPoles(): GPUComputePipeline {
+    this.refreshPolesPipeline ??= this.device.createComputePipeline({
+      layout: 'auto',
+      compute: { module: this.brush, entryPoint: 'refresh', constants: { POLES: 1 } },
+    });
+    return this.refreshPolesPipeline;
   }
 
   private static async build(
@@ -2078,7 +3186,7 @@ class Kernels {
     // outline()).
     const sort = module(sortWgsl);
     const start = module(initSource);
-    const brush = module(paintWgsl);
+    const brush = module(brushWgsl + paintWgsl);
     const [
       init,
       claimStart,
@@ -2155,14 +3263,15 @@ const OUTLINE_CONSTANTS: Readonly<Record<OutlineVariant, Record<string, number>>
 /**
  * Which pipeline of the outline pass a segment takes (Kernels.outline): the eraser and walls with the tile of `env`
  * (paint.wgsl TILED), a wide eraser also with its core (CORE), food and light without the tile; each with the search
- * of the segment's own cells where some cell may need it (OWN_SEARCH, brush.ts ownHeldEverywhere()).
+ * of the segment's own cells where some cell may need it (OWN_SEARCH, brush.ts ownHeldEverywhere()). `poles`: on the
+ * outlines of the electrodes every stroke subtracts from a layer, so every stroke takes the tile.
  */
-function outlineVariant(segment: Stroke | undefined, own: boolean): OutlineVariant {
+function outlineVariant(segment: Stroke | undefined, own: boolean, poles = false): OutlineVariant {
   const kind = segment?.kind ?? 'food';
   const base =
     kind === 'erase' && (segment?.radius ?? 0) >= CORE_RADIUS
       ? 'core'
-      : kind === 'erase' || kind === 'wall'
+      : poles || kind === 'erase' || kind === 'wall'
         ? 'tiled'
         : 'untiled';
   return `${base}${own ? 'Own' : 'Held'}`;

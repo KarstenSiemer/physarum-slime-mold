@@ -72,6 +72,8 @@ const FORMATS: Record<number, [number, number]> = {
   [WebGL2RenderingContext.R32F]: [WebGL2RenderingContext.RED, WebGL2RenderingContext.FLOAT],
   [WebGL2RenderingContext.RGBA16F]: [WebGL2RenderingContext.RGBA, WebGL2RenderingContext.HALF_FLOAT],
   [WebGL2RenderingContext.RGBA8]: [WebGL2RenderingContext.RGBA, WebGL2RenderingContext.UNSIGNED_BYTE],
+  [WebGL2RenderingContext.R32UI]: [WebGL2RenderingContext.RED_INTEGER, WebGL2RenderingContext.UNSIGNED_INT],
+  [WebGL2RenderingContext.R8UI]: [WebGL2RenderingContext.RED_INTEGER, WebGL2RenderingContext.UNSIGNED_BYTE],
 };
 
 export function target(gl: GL, width: number, height: number, format: number, linear = false): Target {
@@ -130,6 +132,15 @@ export function clear(gl: GL, t: Target) {
   gl.clear(gl.COLOR_BUFFER_BIT);
 }
 
+/**
+ * Clears a target of unsigned integers (R32UI) to 0. clear() is for targets of floats and bytes: WebGL 2 clears no
+ * integer buffer with it.
+ */
+export function clearUint(gl: GL, t: Target) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array(4));
+}
+
 export function destroyTarget(gl: GL, t: Target) {
   gl.deleteTexture(t.texture);
   gl.deleteFramebuffer(t.fbo);
@@ -161,6 +172,25 @@ export function readTarget(gl: GL, t: Target): Float32Array | Uint8Array {
   const out = new Float32Array(t.width * t.height * 4);
   gl.readPixels(0, 0, t.width, t.height, gl.RGBA, gl.FLOAT, out);
   return out;
+}
+
+/**
+ * Reads a whole target of unsigned integers with one channel (R32UI), one value per texel, rows from y = 0. Every
+ * WebGL 2 reads such a target as RGBA_INTEGER and UNSIGNED_INT, so it reads four values per texel and keeps the first.
+ */
+export function readUintTarget(gl: GL, t: Target): Uint32Array {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  const rgba = new Uint32Array(t.width * t.height * 4);
+  gl.readPixels(0, 0, t.width, t.height, gl.RGBA_INTEGER, gl.UNSIGNED_INT, rgba);
+  return Uint32Array.from({ length: t.width * t.height }, (_, i) => rgba[i * 4] ?? 0);
+}
+
+/** Reads a whole target of unsigned integers with four channels (RGBA32UI), four values per texel, rows from y = 0. */
+export function readUint4Target(gl: GL, t: Target): Uint32Array {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+  const rgba = new Uint32Array(t.width * t.height * 4);
+  gl.readPixels(0, 0, t.width, t.height, gl.RGBA_INTEGER, gl.UNSIGNED_INT, rgba);
+  return rgba;
 }
 
 /**

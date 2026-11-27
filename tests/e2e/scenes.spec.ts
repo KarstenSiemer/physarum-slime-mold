@@ -35,7 +35,8 @@ for (const viewport of [
   }) => {
     const errors = watchErrors(page);
     await page.setViewportSize(viewport);
-    // A small device memory keeps the start scene small on SwiftShader in CI; the grid it lowers shows a notice.
+    // A small device memory: the device cannot hold the lattice of the start scene, three strains with a flow each
+    // (ADR 0064). The scene then runs on a grid shaped like the screen, and a notice says so.
     await page.addInitScript(() => {
       Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 0.25 });
     });
@@ -43,7 +44,7 @@ for (const viewport of [
     const label = page.getByRole('button', { name: /^Scene: Three strains/ });
     await expect(label).toBeVisible();
     const notice = page.getByRole('status');
-    await expect(notice).toContainText('Lowered the grid to', { timeout: 60_000 });
+    await expect(notice).toContainText('This device cannot hold a lattice of 384 × 384 cells', { timeout: 60_000 });
     const [l, n, t] = [await box(label), await box(notice), await box(page.getByRole('toolbar'))];
     expect(overlap(l, n)).toBe(false);
     expect(overlap(l, t)).toBe(false);
@@ -145,7 +146,7 @@ test('Reload scene restores food, light and walls, and keeps the focus in the ca
   await expect(changed).toBeHidden();
   // A Clear changes the scene too, and Reload scene brings its walls and food back.
   await page.locator('summary', { hasText: 'Environment' }).click();
-  await page.getByRole('button', { name: 'Clear food, light, walls and electrodes' }).click();
+  await page.getByRole('button', { name: 'Clear food, light, walls, electrodes and slime' }).click();
   await expect.poll(async () => (await environment(page)).slice(0, 3), { timeout: 30_000 }).toEqual([0, 0, 0]);
   await expect(changed).toBeVisible();
   await card(page).getByRole('button', { name: 'Reload scene' }).click();
@@ -219,6 +220,7 @@ test('More in Learn opens the topic for the source of the scene', async ({ page 
     ['maze', 'Nakagaki et al. 2000', 'Physarum'],
     ['tokyo', 'Tero et al. 2010, Fig. 1', 'Physarum'],
     ['tokyo-light', 'Tero et al. 2010, Fig. 2B', 'Physarum'],
+    ['y-maze', 'Reid et al. 2012', 'Physarum'],
     ['three-strains', 'Made for this app', 'Scenes'],
   ] as const) {
     await preset(page).selectOption(id);
@@ -331,7 +333,7 @@ test('a boundary or a Clear chosen while the engine starts reaches the scene', a
   await page.goto('/');
   await preset(page).selectOption('maze');
   await page.locator('summary', { hasText: 'Environment' }).click();
-  await page.getByRole('button', { name: 'Clear food, light, walls and electrodes' }).click();
+  await page.getByRole('button', { name: 'Clear food, light, walls, electrodes and slime' }).click();
   expect(await page.evaluate(() => globalThis.physarum === undefined)).toBe(true);
   await ready('box');
   await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 0, undefined, { timeout: 60_000 });
@@ -451,7 +453,7 @@ test('Learn → Scenes loads a scene, and the panel shows it', async ({ page }) 
   await page.getByRole('button', { name: 'Learn', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Learn' });
   await dialog.getByRole('tab', { name: 'Scenes' }).click();
-  for (const group of ['Start here', 'Jones 2010', 'Experiments', 'Fogleman 2020'])
+  for (const group of ['Start here', 'Experiments', 'Jones 2010', 'Paper experiments', 'Agents share cells'])
     await expect(dialog.getByRole('heading', { name: group, exact: true })).toBeVisible();
   await dialog.getByRole('button', { name: 'Details of Turing spots' }).click();
   await expect(dialog).toContainText('Why these settings:');

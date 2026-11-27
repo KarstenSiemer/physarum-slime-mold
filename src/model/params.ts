@@ -147,6 +147,12 @@ export const MODELS = ['jones', 'extended'] as const;
  */
 export const STEP_ORDERS = ['move-first', 'sense-first'] as const;
 export type StepOrder = (typeof STEP_ORDERS)[number];
+/**
+ * The neighbours of a cell in the flow in the tubes (ADR 0086): 4, the cells that share a side with it, or 8, also the
+ * cells at its corners (ADR 0081). Only with the flow; every scene has 4.
+ */
+export const FLOW_EDGES = [4, 8] as const;
+export type FlowEdges = (typeof FLOW_EDGES)[number];
 
 export type Layout = (typeof LAYOUTS)[number];
 export type Boundary = (typeof BOUNDARIES)[number];
@@ -157,7 +163,7 @@ export type Model = (typeof MODELS)[number];
 export const globalSpec = {
   density: {
     label: 'Agents per cell',
-    help: 'Agents per cell of the grid. In a dish it counts the cells of the square around the dish, as Jones counts his population (%p) over a square lattice. His dish spans 0.945 of its side, and so does this app’s. Jones uses 0.03–0.15 (%p 3–15) with one agent per cell; GPU versions without the rule use 1–5.',
+    help: 'Agents per cell of the grid. In a dish it counts the cells of the square around the dish, as Jones counts his population (%p) over a square lattice. His dish spans 0.945 of its side, and so does this app’s. Jones uses 0.03–0.15 (%p 3–15) with one agent per cell; GPU versions without the rule use 1–5. With One agent per cell, a value near 1 blocks almost every agent. Jones’ networks need free cells: a blocked agent turns, and its turns start new branches. With Growth on, this value sets only the start: Growth then sets the size of the colony, up to Capacity.',
     min: 0.01,
     max: 8,
     step: 0.01,
@@ -254,7 +260,7 @@ export const globalSpec = {
   // count includes the agent itself (ADR 0024, decision 6).
   capacity: {
     label: 'Capacity',
-    help: 'The most agents that the simulation holds per cell, alive and dead. Agents per cell sets how many live at the start. The others wait as dead agents, and Growth and the Inoculate tool bring them to life. Capacity is never below Agents per cell. With one agent per cell, Capacity is at most 1: then there is room for an agent in every cell. More capacity uses more memory. A change restarts the scene.',
+    help: 'The most agents that the simulation holds per cell, alive and dead. Agents per cell sets how many live at the start. The others wait as dead agents, and Growth and the Inoculate tool bring them to life. Capacity is never below Agents per cell. With one agent per cell, Capacity is at most 1: then there is room for an agent in every cell. Each strain gets the part of the agents that its Population share gives it. Growth stops at the capacity only when every agent of a strain lives. In the scenes of this app no strain filled more than 87 % of its part, and twice the capacity left the most agents of Three strains as they were. More capacity uses more memory. A change restarts the scene.',
     min: 0.01,
     max: 8,
     step: 0.01,
@@ -328,16 +334,78 @@ export const globalSpec = {
     step: 1,
     ref: 'Jones 2011, Sec. 5.1',
   },
+  // The slime field (ADR 0055): the extended model only. The default is the time that ADR 0054 took for the mark of
+  // starved ground, 6 days. The same setting gives that mark its time (engine/flow.ts recoverShare()).
+  slimeLife: {
+    label: 'Slime life time',
+    unit: 'hours',
+    help: 'Only the extended model has this setting. Slime is the layer that a slime mold leaves on the ground where it was. A cell gets slime in every step in which it holds plasmodium: the trail of a strain there is strong enough for a tube to grow. The slime stays for this many hours of model time after the last such step. An hour is 1,800 steps. At 0 the model has no slime. The picture shows the slime as a wet film on the ground, which gets thinner until this time is over (the switch Show slime). Without the rules of the growth front no rule reads the slime, so the slime changes no run. With the rules, the growth front takes less flux on slime (Weight on slime). With Flow in the tubes the setting does one more thing: it says how long the ground that a starved tube left stays marked. That ground is fresh again after about this time, and children can be born onto it after about six tenths of this time: after 6 days and 3.7 days at the default of 144 hours. At 0 the mark keeps these times. A shorter time lets a colony grow back sooner: Food ring held 2,809 agents at step 20,000 with 12 hours, and 2,085 with 144. The papers report no life time of slime: 144 hours is the longest time for which one of them reports that a slime mold avoids slime.',
+    min: 0,
+    max: 240,
+    step: 1,
+    ref: 'Reid et al. 2012, PNAS 109: 17490; Reid et al. 2013, Behav. Ecol. 24: 812, as Tröger et al. 2024 cite it',
+  },
+  // The avoidance of slime of the rules of stage 4 (ADR 0088): the weight of a sink on slime (ADR 0065, decision 5)
+  // and the reach of its test for ground without slime (ADR 0067, decision 10), only with the rules. The panel shows
+  // both in the Slime section below Slime life time while the rules run. One value for all strains.
+  slimeWeight: {
+    label: 'Weight on slime',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front takes flux from the foods at its parts with free ground beside them. A part near ground without slime (Reach to fresh ground) takes it with the weight 1, and a part with only slime around it with this weight. So at 0.025 a part on slime takes 40 times less flux than a part near fresh ground, and the plasm streams to the fresh ground: the colony avoids slime. In a Y-maze with slime on one arm it takes the other arm. At 1 the slime changes nothing. The weight sets only the shares: where every part of the front lies on slime, as in a dish with slime everywhere, each takes as much as without slime, and the colony grows as fast. 0.025 is the value of the rules.',
+    min: 0.001,
+    max: 1,
+    step: 0.001,
+    log: true,
+    ref: 'Reid et al. 2012, PNAS 109: 17490',
+  },
+  freshReach: {
+    label: 'Reach to fresh ground',
+    unit: 'cells',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. A part of the growth front counts as near fresh ground, ground without slime, when a path of at most this many cells reaches such ground. A path goes from a cell to one of its 8 neighbours and not past the corner of a wall. A part near fresh ground takes flux with the weight 1, and a part with only slime around it with the Weight on slime. The colony leaves fresh slime right around its front: on blank ground about a sixth of the front sees fresh ground within 2 cells, three quarters within 4, and nearly all within 6. 2 is the least reach: a part of the front lies at most 2 cells from ground outside the colony, and within 1 cell every part sees only its own slime. 6 is the value of the rules and the most that the passes on the GPU hold.',
+    min: 2,
+    max: 6,
+    step: 1,
+  },
   // Flow in the tubes (ADR 0029): the extended model only. Tero et al. 2010 call the total flux between a source
   // and a sink I0, in units of the flux at which a tube grows at half its top rate.
   flowStrength: {
     label: 'Flow strength',
-    help: 'The flux that each food gives or takes while Flow in the tubes is on (I0 of Tero et al.). A low value keeps only the tubes that the network needs, so it gets close to a tree. A high value also keeps side routes, so the network has more loops and survives a cut tube. The unit is the flux through one cell at which the flow memory of the cell goes to one half. Dead agents come back to life only where that memory is above one half. So without Growth and shrinkage a tube needs enough flux for each of its cells: in the Maze a strength of 2 is too low, and 4 is enough.',
+    help: 'The flux that each food gives or takes while Flow in the tubes is on (I0 of Tero et al.). A low value keeps only the tubes that the network needs, so it gets close to a tree. A high value also keeps side routes, so the network has more loops and survives a cut tube. The unit is the flux through one cell at which the flow memory of the cell goes to one half. Dead agents come back to life only where that memory is above one half. So without Growth and shrinkage a tube needs enough flux for each of its cells: in the Maze a strength of 2 is too low, and 4 is enough. With Growth and shrinkage a higher value keeps more of a colony after the pruning: Food ring held 2,994 agents at step 20,000 with 8, and 2,085 with 2. With the rules of the growth front the value also sets how fast the colony grows: every birth costs one from a budget, and the flux that the front takes adds a tenth of the value to it in each step for each food that the colony covers. Food ring with the rules and the levers of the Crown of veins held 13,825 agents at step 10,000 with 8, and 1,806 with 2.',
     min: 0.1,
     max: 32,
     step: 0.1,
     log: true,
     ref: 'Tero et al. 2010, Science 327: 439, Fig. 3 and S1',
+  },
+  // The base conductance of a tube (ADR 0086): a lever of the crown of the prototype (ADR 0083, ADR 0084), in every
+  // scene with the flow. The panel shows it below Flow strength, and the scene Crown of veins has 0.002 (ADR 0087).
+  flowBase: {
+    label: 'Base conductance',
+    help: 'Only the extended model has this setting, and only with Flow in the tubes. The conductivity of a cell with a tube is its tube body times the sum of this value and its flow memory. The flow memory grows where much flux runs. So at a low value a tube with much flux conducts far better than the thin sheet beside it, and the flux gathers in fewer veins. At a high value the sheet carries more of the flux. 0.02 is the value of the model. With the rules of the growth front, the flow over 8 neighbours and twice the flux to the front, 0.002 gives a growing colony a few main veins that fork toward its rim, as in the scene Crown of veins.',
+    min: 0.001,
+    max: 0.1,
+    step: 0.0001,
+    log: true,
+  },
+  // The drift of the rules of stage 4 (ADR 0065, decision 6; ADR 0070): the weight of the pressure of the flow in the
+  // sensors of an agent. The panel shows it with the rules (ADR 0087). Whether each strain gets a weight of its own
+  // stays open (part E4 of the engine, research/front/ENGINE.md). The forms that the help names are those that the
+  // drift `take` gives in the neck (ADR 0076, finding 3; ADR 0087).
+  drift: {
+    label: 'Drift',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. Each sensor of an agent reads the pressure of the flow of its strain as a repellent, with this weight: the plasm streams down the pressure, to the growth front that takes the flux. The weight sets the form of the front: 0 gives a tree of tubes, and 1.25 to 5 a sheet at the head of a tube, whose width the weight sets. No weight gave a crown that moves on ahead of its tube. The weight is divided by the number of foods that the colony covers, because each covered food adds its flux to the front: so the plasm reads the pressure of one food, and the zone behind the front stays narrow.',
+    min: 0,
+    max: 5,
+    step: 0.05,
+  },
+  // The flux that the front of a strain takes, k (ADR 0086; ADR 0083): a lever of the crown of the prototype, only with
+  // the rules of stage 4. The panel shows it with the rules, and the scene Crown of veins has 2 (ADR 0087).
+  frontFlux: {
+    label: 'Flux to the front',
+    help: 'Only the extended model has this setting, and only with the rules of the growth front. The growth front of a strain takes this many times twice the Flow strength from each food that it covers, and the tubes carry it to the front. The births that this flux pays stay as many: one birth costs this many times more flux. So the flux changes the tubes and the sheet toward the front, and not the number of the births that it pays: Flow strength sets that number. 1 is the value of the rules. With the base conductance 0.002 and the flow over 8 neighbours, 2 gives a growing colony a few main veins that fork toward its rim, as in the scene Crown of veins.',
+    min: 0.25,
+    max: 16,
+    step: 0.05,
+    log: true,
   },
   speed: {
     label: 'Speed',
@@ -439,20 +507,62 @@ export const coveredFoodHelp = {
 /** Help for the switch "Flow in the tubes" (ADR 0029); Learn → Controls lists it with the sliders. */
 export const flowHelp = {
   label: 'Flow in the tubes',
-  help: 'Only the extended model has this rule. It follows the slime mold: a tube that carries much flow gets thicker, and a tube with little flow decays. Each food that the colony covers gives or takes a fixed flux, and as many foods give as take. The flux runs through the tubes from the foods that give to the foods that take (Kirchhoff’s law, as in the model of Tero, Kobayashi and Nakagaki). Each strain is a slime mold of its own and has its own flow: its flux runs only through its own tubes, between the foods that it covers. With two foods, the first one gives and the other takes. With more, the app draws again every ten minutes of model time which foods give and which take. Each cell remembers the flux that passed it. Where that memory is low, the tube starves: its agents die. With Growth and shrinkage they do not divide there, and no child is born there. A tube without any flux starves after about half an hour of model time. Where the memory is high, dead agents come back to life, so the tube gets wider. Thirty steps are one minute of model time. With two foods, one thick tube along a short route remains. With many foods, a network with loops remains. While the colony covers fewer than two foods, no flux runs between foods, and the memory stays as it is. On fresh ground few agents starve: without Growth and shrinkage, half of a colony is gone after about 8 hours of model time. The rule costs time: the app solves the pressure in the tubes with 16 passes over the grid at each step, for each strain.',
+  help: 'Only the extended model has this rule. It follows the slime mold: a tube that carries much flow gets thicker, and a tube with little flow decays. Each food that the colony covers gives or takes a fixed flux, and as many foods give as take. The flux runs through the tubes from the foods that give to the foods that take (Kirchhoff’s law, as in the model of Tero, Kobayashi and Nakagaki). Each strain is a slime mold of its own and has its own flow: its flux runs only through its own tubes, between the foods that it covers. With two foods, the first one gives and the other takes. With more, the app draws again every ten minutes of model time which foods give and which take. Each cell remembers the flux that passed it. Where that memory is low, the tube starves: its agents die. With Growth and shrinkage they do not divide there, and no child is born there. A tube without any flux starves after about half an hour of model time. The ground that it leaves stays closed for children for about six tenths of the Slime life time: for 3.7 days of model time at 144 hours. This ends the growth of most scenes: after its peak a colony loses the tubes that carry no flux, and it cannot grow back onto their ground. A shorter Slime life time lets it grow back sooner. Where the memory is high, dead agents come back to life, so the tube gets wider. Thirty steps are one minute of model time. With two foods, one thick tube along a short route remains. With many foods, a network with loops remains. While the colony covers fewer than two foods, no flux runs between foods, and the memory stays as it is. On fresh ground few agents starve: without Growth and shrinkage, half of a colony is gone after about 8 hours of model time. In the picture small grains move in each tube with the flow of the plasm, and they move faster where the flow is faster. They go back and forth, as the plasm of the real slime mold does about every 2 minutes; the model holds only the mean flow, so this swing is in the picture alone. The grains show with Draw the tubes by their flow on or off, in every style but Agents only. The rule costs time: the app solves the pressure in the tubes with 16 passes over the grid at each step, for each strain.',
   ref: 'Tero, Kobayashi and Nakagaki 2007, J. Theor. Biol. 244: 553; Tero et al. 2010, Science 327: 439; Marbach et al. 2023, eLife 12: e78100',
 } as const;
+
+/** Help for the switch "Flow over 8 neighbours" (`flowEdges`, ADR 0086) below Flow strength (ADR 0087). */
+export const flowEdgesHelp = {
+  label: 'Flow over 8 neighbours',
+  help: 'Only the extended model has this setting, and only with Flow in the tubes. With 4 neighbours the flux runs from each cell to the 4 cells that share a side with it. With 8 it also runs to the 4 cells at its corners, but not past the corner of a wall. With 4, a broad flow reads up to 1.41 times more flux along a diagonal of the grid than along an axis, and a thin vein on a diagonal is a staircase, so the veins prefer the directions of the grid. With 8, a broad flow and a thin vein read their flux the same in every direction to within 8 %, and the veins follow the flow, not the grid. Every scene but the Crown of veins has 4.',
+} as const;
+
+/**
+ * Help for the switch "Rules of the growth front" (`territory`, ADR 0068 to ADR 0075) below the switch of the flow over
+ * 8 neighbours (ADR 0087): the rules of stage 4 of docs/model.md, 6.10, 6.11, 8.7 and 9.1.
+ */
+export const territoryHelp = {
+  label: 'Rules of the growth front',
+  help: 'Only the extended model has these rules, and only with Growth and shrinkage and Flow in the tubes. They follow the growth front of the slime mold. Each strain has a ground of its own: its agents move, come back to life and are born only there. The agents at the edge push the ground open: a cell beside it joins it with a chance of about 0.4 % per step for each agent of the strain next to the cell, so the front moves faster where more plasm lies at it. The agents at the edge with free ground beside them take flux from the foods, 40 times less on slime than near ground without slime by default (Weight on slime and Reach to fresh ground, in the Slime section). The tubes carry this flux to the front, and it pays the growth: every birth costs one from a budget, the births at the front first and then those of Jones’ rule, and an agent that dies gives one back. An agent at the front is paid in the share of the flux that it takes, so an agent on slime is paid seldom even when the budget could pay every agent, and a colony takes the arm of a Y-maze without slime. Each food that the colony covers adds a tenth of the Flow strength to the budget in each step, but never more than the agents at the front can spend. So the colony grows with its food, and its sheet thins behind the front. Once the colony fills its dish, the front has no room and the food pays nothing: in Food ring the colony then falls from about 16,000 to 17,000 agents to 2,800 to 5,200 at step 20,000, and the budget keeps the rest. The flow still starves the tubes without flux and closes their ground for children: in the Y-mazes and in Slime everywhere this stops the growth. The plasm streams down the pressure of the flow, to the front (Drift). When you switch the rules on here, the panel also sets the levers of the scene Crown of veins: Flow over 8 neighbours, a Base conductance of 0.002, a Flux to the front of 2, and a Flow strength of 8 or more (a higher value stays). With these levers a colony grows faster and forms veins that run from the food to its rim and fork there. In Food ring with the rules it held 8,845 to 9,008 agents at step 8,000 (3 runs), and 1,214 without the levers. When you switch the rules off, these levers do not change. A scene and a link keep their own values. A switch of the rules restarts the scene.',
+  ref: 'Kuroda et al. 2015, J. Exp. Biol. 218: 3729',
+} as const;
+
+/**
+ * The levers of the Crown of veins (ADR 0087) that the panel's switch of the rules of the growth front sets when it
+ * turns them on (ADR 0098, the owner's decision of 2026-11-26): with them a colony grows faster and forms veins. The Flow
+ * strength is at least `CROWN_LEVERS.flowStrength`; a higher one stays. A scene and a link keep their own values.
+ */
+export const CROWN_LEVERS = { flowEdges: 8, flowBase: 0.002, frontFlux: 2, flowStrength: 8 } as const;
+
+/** The values that the switch of the rules sets when it turns them on (CROWN_LEVERS, ADR 0098). */
+export function crownLevers(
+  s: Pick<Settings, 'flowStrength'>,
+): Pick<Settings, 'flowEdges' | 'flowBase' | 'frontFlux' | 'flowStrength'> {
+  const { flowEdges, flowBase, frontFlux, flowStrength } = CROWN_LEVERS;
+  return { flowEdges, flowBase, frontFlux, flowStrength: Math.max(s.flowStrength, flowStrength) };
+}
 
 /** Help for the switch "Draw the tubes by their flow" below Flow in the tubes (ADR 0034); Learn → Controls lists it. */
 export const tubeViewHelp = {
   label: 'Draw the tubes by their flow',
-  help: 'Changes only the picture, not the simulation. Each tube is as wide and as bright as its flow memory says. The flow memory is the conductivity of a tube: it grows where much flow runs, and it falls where little flow runs. So a tube that keeps much flow stays thick, and a tube with little flow gets thin and faint. A new tube starts with a middle value: it is thick at first, until its flow memory follows its flow. For the flow of a liquid in a round tube the conductivity grows with the fourth power of the radius (Poiseuille’s law), so the picture draws a radius that grows with the fourth root of the conductivity. A tube with the largest value is 3 cells wider on each side. Plasmodium without a tube stays in the picture at a quarter of its brightness. A wall stops a tube: no tube is drawn across it. Small grains move in each tube with the flow of the plasm, and they move faster where the flow is faster. They go back and forth, as the plasm of the real slime mold does about every 2 minutes; the model holds only the mean flow, so this swing is in the picture alone. Without the switch the picture shows the trail alone, as it does without the flow.',
+  help: 'Changes only the tubes in the picture, not the simulation. Each tube is as wide and as bright as its flow memory says. The flow memory is the conductivity of a tube: it grows where much flow runs, and it falls where little flow runs. So a tube that keeps much flow stays thick, and a tube with little flow gets thin and faint. A new tube starts with a middle value: it is thick at first, until its flow memory follows its flow. For the flow of a liquid in a round tube the conductivity grows with the fourth power of the radius (Poiseuille’s law), so the picture draws a radius that grows with the fourth root of the conductivity. A tube with the largest value is 3 cells wider on each side. Plasmodium without a tube stays in the picture at a quarter of its brightness. A wall stops a tube: no tube is drawn across it. A tube of strong flow is a vein: it is drawn in a deeper, darker shade of the colour of its strain, and in the Gel style as a low ridge. Without the switch the picture shows the trail alone, as it does without the flow. The switch does not change the grains that move with the flow (Flow in the tubes): they show with the switch on or off, and without it they move over the trail.',
 } as const;
 
 /** Help for the view switch "Scent" (ADR 0009, amendments of 2026-11-11 and 2026-11-12); Learn → Controls lists it. */
 export const scentViewHelp = {
   label: 'Scent',
   help: 'Shows the scent of food as a green glow and the repellent as a pink glow over the picture. The glow is stronger where the scent is stronger, from 0.01 to 10,000 per cell. The scale does not change, so you can compare two scenes or the two models. A green line shows where food steers an agent as strongly as a strand of trail holds it: inside the line, food steers it more. The simulation does not change.',
+} as const;
+
+/** Help for the view switch "Show slime" (ADR 0055, decision 8); Learn → Controls lists it. */
+export const slimeViewHelp = {
+  label: 'Show slime',
+  help: 'Changes only the picture, not the simulation. The picture shows the slime as a wet film on the ground: where the colony was, and where you painted slime. The film is thick where a tube stayed for a long time, and thin where the colony only passed. So the film keeps the shape of the tube that made it, as the slime track of a real slime mold does: a tube leaves its coat of slime behind. A tube that stays for 2.3 hours of model time leaves the thickest film. The food, the trail, the tubes, the light, the walls and the electrodes lie on the film. The film gets thinner in a straight line as the slime gets older, and it is gone after the Slime life time. The Scent view does not draw it. Without the switch the ground is plain.',
+} as const;
+
+export const frontViewHelp = {
+  label: 'Show growth front',
+  help: 'Changes only the picture, not the simulation, and only while growth is on. Where the colony grows onto ground without slime, the picture draws a thin, clear veil of slime around the young tube: the skirt of the growth front. The veil lies below the tube and goes within a few minutes of model time. Plasm that comes back onto slime is no growth front.',
 } as const;
 
 /** The scent decay at which the extended model releases as much scent as the Jones model (emissionScale()). */
@@ -476,14 +586,14 @@ export function emissionScale(scentDecay: number, order: StepOrder): number {
 /** Help for the switch "Growth and shrinkage"; Learn → Controls lists it with the sliders (ADR 0025). */
 export const growthHelp = {
   label: 'Growth and shrinkage',
-  help: 'Jones’ rule from 2011 for the size of the population. Every few steps, each agent that moved counts the agents in a square around it, itself included. If the count lies between Growth minimum and Growth maximum, the agent divides: a dead agent comes to life in a random empty cell next to it. Every few steps, each agent also counts the agents in its shrinkage square. If that count is below Shrinkage minimum or above Shrinkage maximum, the agent dies. So a colony grows at its thin edge, and crowded paths stay thin. A child needs a dead agent: Capacity sets how many agents the simulation holds. In a full scene with the default Capacity, growth only replaces the agents that shrinkage removes, and in a dense scene of Jones shrinkage first removes many agents. With the rule, the Cut tool and a wall painted onto agents kill them, as a wound takes away the plasm of the slime mold, and the colony grows back from the edge; without it, they move the agents elsewhere. The rule needs one agent per cell, because the counts assume it. On a device with little memory, the switch can lower the grid, which restarts the scene. The scene Foraging maze uses the rule.',
+  help: 'Jones’ rule from 2011 for the size of the population. Every few steps, each agent that moved counts the agents in a square around it, itself included. If the count lies between Growth minimum and Growth maximum, the agent divides: a dead agent comes to life in a random empty cell next to it. Every few steps, each agent also counts the agents in its shrinkage square. If that count is below Shrinkage minimum or above Shrinkage maximum, the agent dies. So a colony grows at its thin edge, and crowded paths stay thin. The rule holds a density, not a mass: a colony stops growing when it covers its ground, as in the Crown of veins without the rules of the growth front. With Flow in the tubes the growth ends sooner. Once the colony covers two foods, the tubes without flux starve, and their ground stays closed for children. So the count falls after its peak: in the scenes of this app, to between a fifth and four fifths of the peak by step 20,000. The rules of the growth front let a colony go on growing, at a rate that Flow strength sets. A child needs a dead agent: Capacity sets how many agents the simulation holds. No scene with growth filled it. In a full scene with the default Capacity, growth only replaces the agents that shrinkage removes, and in a dense scene of Jones shrinkage first removes many agents. With the rule, the Cut tool and a wall painted onto agents kill them, as a wound takes away the plasm of the slime mold, and the colony grows back from the edge; without it, they move the agents elsewhere. The rule needs one agent per cell, because the counts assume it. On a device with little memory, the switch can lower the grid, which restarts the scene. The scene Foraging maze uses the rule.',
   ref: 'Jones 2011, Nat. Comput. 10: 1345, Sec. 5.1; Jones and Adamatzky 2014; Jones 2015; Jones, Mayne and Adamatzky 2017',
 } as const;
 
 /** Help for the switch "One agent per cell (Jones 2010)"; Learn → Controls lists it with the sliders. */
 export const collisionsHelp = {
   label: 'One agent per cell',
-  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. The Jones model always has the rule, and only the extended model can switch it off. A switch restarts the population. With the rule, Agents per cell is at most 1.',
+  help: 'Jones’ rule: a cell holds at most one agent. A blocked agent leaves no trail and turns to a random direction. These turns start new branches, so Jones’ networks need the rule: without it, agents pile up and the Transport network contracts into a few straight lines within a few thousand steps. The Jones model always has the rule, and only the extended model can switch it off. A switch restarts the population. With the rule, Agents per cell is the share of the cells that hold an agent, 1 at most. At 1 every cell is full and no agent can move. So a switch to the rule from 1 agent per cell or more sets Agents per cell to 0.15, Jones’ value, and a switch back puts the value of before back.',
   ref: 'Jones 2010, p. 133 and 135',
 } as const;
 
@@ -515,16 +625,38 @@ export interface Settings extends Record<GlobalKey, number> {
   stepOrder: StepOrder;
   /** Flow in the tubes (flowHelp, ADR 0029), with `flowStrength`. Only in the extended model (constrain()). */
   flow: boolean;
+  /**
+   * The neighbours of a cell in the flow (flowEdgesHelp, ADR 0086), with `flowBase`: in force while the flow is on.
+   * The Jones model binds it to 4 (constrain()).
+   */
+  flowEdges: FlowEdges;
+  /**
+   * The rules of stage 4 (ADR 0065, ADR 0067, ADR 0068), named for their first rule: each strain has a territory,
+   * agents move, come to life and are born only onto the territory of their strain, and the agents push it open. They
+   * run only in the extended model with growth and the flow (engine/territory.ts territoryOn()). The scene Crown of
+   * veins has them (ADR 0087).
+   */
+  territory: boolean;
   style: Style;
   /** In the gel style: how pale and how clear thin gel is against thick gel. Display only. */
   gelColor: GelColor;
   /** The view draws the food scent and the light repellent over the picture (scentViewHelp). Display only. */
   showScent: boolean;
   /**
-   * While the flow in the tubes is on, the view draws every tube as wide and as bright as its flow memory says, and
-   * grains that move with the flow (tubeViewHelp, ADR 0034). Display only.
+   * While the flow in the tubes is on, the view draws every tube as wide and as bright as its flow memory says
+   * (tubeViewHelp, ADR 0034). Display only. The grains that move with the flow show with it on or off (ADR 0095).
    */
   showTubes: boolean;
+  /**
+   * The view draws the slime as a wet film on the ground, while the model has slime (slimeViewHelp, ADR 0055,
+   * decision 8). Display only.
+   */
+  showSlime: boolean;
+  /**
+   * The view draws a skirt around young ground, a thin clear veil below the tube, while the model has slime
+   * (frontViewHelp, ADR 0060). Display only.
+   */
+  showFront: boolean;
   strains: Strain[];
 }
 
@@ -578,10 +710,14 @@ export function defaultSettings(): Settings {
     growth: false,
     stepOrder: 'sense-first',
     flow: false,
-    style: 'glow',
+    flowEdges: 4,
+    territory: false,
+    style: 'gel',
     gelColor: 'mild',
     showScent: false,
     showTubes: true,
+    showSlime: true,
+    showFront: true,
     density: 1,
     diffusion: 1,
     meanWindow: 3,
@@ -607,8 +743,20 @@ export function defaultSettings(): Settings {
     shrinkWindow: 5,
     shrinkMin: 0,
     shrinkMax: 20,
+    // 6 days (ADR 0055): the time of the mark of starved ground of ADR 0054.
+    slimeLife: 144,
     // Tero et al. 2010 use I0 = 2 per tube (Fig. 4); a tube of this app is about 4 cells wide (ADR 0029).
     flowStrength: 8,
+    // The base conductance of ADR 0029 (engine/flow.ts FLOW.base; ADR 0086).
+    flowBase: 0.02,
+    // The crown of ADR 0065, decision 6: provisional until the scenes take the rules of stage 4 up (ADR 0070).
+    drift: 1.5,
+    // The sinks take 2 · I0 together (ADR 0065, decision 1; ADR 0086).
+    frontFlux: 1,
+    // A sink on slime has the weight 0.025, the owner's decision of 2026-11-19 (ADR 0065, decision 5), and ground
+    // without slime counts within 6 steps (ADR 0067, decision 10; ADR 0088).
+    slimeWeight: 0.025,
+    freshReach: 6,
     speed: 120,
     exposure: 0,
     bloom: 1,
@@ -685,6 +833,11 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // A link from before the picture of the tubes holds no switch for it: the picture is on, as for a new scene. It
   // changes no result (ADR 0034).
   out.showTubes = raw.showTubes !== false;
+  // So with the film of the slime (ADR 0055, decision 8): a link from before it holds no switch for it, and the film
+  // is on. It changes no result.
+  out.showSlime = raw.showSlime !== false;
+  // So with the skirt of the growth front (ADR 0060): on without a switch in the link. It changes no result.
+  out.showFront = raw.showFront !== false;
   out.collisions = raw.collisions === true;
   // A link made before the model switch holds no model. That code ran every link with this app's additions, so the
   // link opens with the extended model, and with Jones' model only if that runs it as it was made (ADR 0022).
@@ -697,6 +850,11 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   // without it runs with 0: a link made before the rule runs as it was made, with growth that does not read light
   // (ADR 0050). A link of the Jones model gets the default back below (asJones() in constrain()).
   if (typeof raw.lightGrowth !== 'number') out.lightGrowth = 0;
+  // So with Slime life time (ADR 0055, decision 10): a link without it, or with a value that is no number, has no
+  // slime, and its starved ground keeps the time of ADR 0054, so the link runs as it was made. Whole hours, the step of
+  // the setting: a time such as 1e-300 would be above 0 and give the mark of starved ground a share that f32 cannot
+  // hold (engine/flow.ts recoverShare()).
+  out.slimeLife = Number.isFinite(raw.slimeLife) ? Math.round(out.slimeLife) : 0;
   // Growth and shrinkage (ADR 0025): whole steps and counts, and windows of an odd side, so that the agent sits in the
   // middle of its window. A link without them keeps growth off.
   out.growth = raw.growth === true;
@@ -709,6 +867,13 @@ export function sanitize(input: unknown, drawn: Drawn = new Set(), order: StepOr
   out.stepOrder = oneOf(raw.stepOrder, STEP_ORDERS, order);
   // A link from before the flow holds none: it stays off (ADR 0029).
   out.flow = raw.flow === true;
+  // So with the neighbours of the flow (ADR 0086): a link without them runs with 4, as it was made.
+  out.flowEdges = raw.flowEdges === 8 ? 8 : 4;
+  // So with the rules of stage 4 (ADR 0068): a link without the setting runs without them, as it was made.
+  out.territory = raw.territory === true;
+  // The reach to fresh ground counts the steps of a path, a whole number (ADR 0088). A link without it, or without the
+  // weight on slime, runs with the default, the constant of before.
+  out.freshReach = Math.round(out.freshReach);
 
   const strains = Array.isArray(raw.strains) ? raw.strains.slice(0, MAX_STRAINS) : [];
   const n = Math.max(1, strains.length);
@@ -837,8 +1002,8 @@ export function jonesFits(s: Settings): boolean {
  * (Jones 2010, p. 144): its scent decays with the strain's decay, and the strain weighs it as its own trail. A
  * repellent source goes into the same map with a value below 0 (Jones and Adamatzky 2015, Sec. 4.1; ADR 0044): the
  * strain weighs it as its own trail too, and its strength stays the user's. Jones' papers have neither trail
- * saturation, nor a flow in the tubes, nor light that stops growth, so their values return to the defaults, and a link holds none of them. Returns
- * `s` itself when it holds these values already.
+ * saturation, nor a flow in the tubes, nor light that stops growth, nor slime, nor a territory, so their values return
+ * to the defaults, and a link holds none of them. Returns `s` itself when it holds these values already.
  */
 function asJones(s: Settings): Settings {
   const d = defaultSettings();
@@ -850,26 +1015,57 @@ function asJones(s: Settings): Settings {
   const bound = s.scentDecay === st.decay && s.trailSaturation === 0;
   // The flow in the tubes is this app's rule (ADR 0029): the Jones model never has it, and a link holds none of it.
   // Light stops growth is this app's rule too (ADR 0050): the Jones model packs none of it (packParams()).
-  const ok = strainOk && bound && !s.flow && s.flowStrength === d.flowStrength && s.lightGrowth === d.lightGrowth;
+  // So is the slime (ADR 0055): the Jones model has none, and packs a life time of 0 (engine/slime.ts slimeSteps()).
+  // So are the rules of stage 4 (ADR 0068): they need the flow, and a link of the Jones model holds none of them, nor
+  // their drift (ADR 0070), nor the flux of their front (ADR 0086), nor their weight on slime and reach to fresh ground
+  // (ADR 0088). Nor the neighbours and the base conductance of the flow (ADR 0086).
+  const slime = s.slimeWeight === d.slimeWeight && s.freshReach === d.freshReach;
+  const stage4 = !s.territory && s.drift === d.drift && s.frontFlux === d.frontFlux && slime;
+  const own = s.lightGrowth === d.lightGrowth && s.slimeLife === d.slimeLife && stage4;
+  const flow = !s.flow && s.flowStrength === d.flowStrength && s.flowEdges === d.flowEdges && s.flowBase === d.flowBase;
+  const ok = strainOk && bound && flow && own;
   if (ok) return s;
   return {
     ...s,
     scentDecay: st.decay,
     trailSaturation: 0,
     flow: false,
+    flowEdges: d.flowEdges,
+    flowBase: d.flowBase,
+    territory: false,
+    drift: d.drift,
+    frontFlux: d.frontFlux,
+    slimeWeight: d.slimeWeight,
+    freshReach: d.freshReach,
     flowStrength: d.flowStrength,
     lightGrowth: d.lightGrowth,
+    slimeLife: d.slimeLife,
     strains: strainOk ? s.strains : [{ ...st, food: self, light: self, share: 1 }],
   };
 }
 
+/** Jones' population of his networks: 15 % of the cells hold an agent (Jones 2010, Fig. 4 and 5; Table 1, %p). */
+export const JONES_DENSITY = 0.15;
+
+/**
+ * The settings with the rule of one agent per cell switched on (ADR 0063). With the rule, Agents per cell is the share
+ * of the cells that hold an agent, 1 at most (constrain()). Settings without the rule that hold 1 agent per cell or
+ * more would start with an agent in every cell: no cell is free, so no agent moves to another cell, and with growth
+ * the first shrinkage test kills every agent but those at the rim. Such settings get Jones' population. A value below
+ * 1 is a share of the cells with the rule too, and stays. Returns `s` itself when the rule is on already.
+ */
+export function withRule(s: Settings): Settings {
+  if (s.collisions) return s;
+  return { ...s, collisions: true, density: s.density >= 1 ? JONES_DENSITY : s.density };
+}
+
 /**
  * The settings in Jones' model: strain A alone, which follows or flees its own trail with weight 1, one agent per
- * cell, one mean per step, and the bound values of asJones(). The panel's switch to Jones uses it.
+ * cell (withRule()), one mean per step, and the bound values of asJones(). The panel's switch to Jones uses it.
  */
 export function toJones(s: Settings): Settings {
   const st = s.strains[0] ?? defaultStrain(0);
   const self = (st.attraction[0] ?? 1) < 0 ? -1 : 1;
   const attraction = st.attraction.map((v, j) => (j === 0 ? self : v));
-  return constrain({ ...s, model: 'jones', collisions: true, diffusion: 1, strains: [{ ...st, attraction }] });
+  return constrain({ ...withRule(s), model: 'jones', diffusion: 1, strains: [{ ...st, attraction }] });
 }

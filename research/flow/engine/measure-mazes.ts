@@ -17,7 +17,19 @@
 // and `flowDoors` are the same for the flow memory above 0.5.
 // The line of a run holds means over the dumps of its last 10,000 steps: the colony keeps growing short branches
 // into empty corridors, so one dump alone says little.
+//
+// UNTIL=<step>: only the dumps up to that step count, so that a long run gives the lines of a run of that length.
+// WINDOW=<steps>: after the line of a run, one line per window of that many steps, for a long run (ADR 0054): the
+// share of its dumps in which the tube joins the foods and the share of the tube cells on the route; for the Snail
+// maze the mean of the blind branches and the share of the pairs of a dump and a branch with 0.10 or more; for the Corn
+// maze the shares of the dumps with a tube on another route than the shortest, and with flow on the shortest alone.
+// GROUND=1: the line of a dump also holds `offClosed`: of the cells with such a trail that do not lie on the
+// shortest route, the share on closed ground (a flow memory below 0.01). No child is born onto closed ground (ADR
+// 0054), so these cells hold agents that walked there. For the Corn maze it holds `detours` too: for each longer
+// route with a tube in this dump, the share of closed ground in the rooms of that route that the shortest route
+// does not cross. The line of the run holds the mean of `offClosed` and the least share of the detours.
 import { readdirSync, readFileSync } from 'node:fs';
+import { FLOW } from '../../../src/engine/flow.ts';
 import { CORN_MAZE, PRESETS } from '../../../src/model/presets.ts';
 import { measure, zones } from '../prototype/maze.ts';
 import { outDir } from '../prototype/out.ts';
@@ -92,7 +104,7 @@ function corn() {
     const d = geodesic(world, siteCells(world, 0), (c) => !!world.open[c] && on.has(roomOf(c)) && !shut.has(c));
     return Math.min(...siteCells(world, 1).map((c) => d[c]!));
   });
-  return { open, all, cellsOf, door };
+  return { open, all, cellsOf, door, roomOf };
 }
 
 const blind = scene === 'snail-maze' ? branches() : [];
@@ -113,6 +125,12 @@ if (names.length === 0) {
 
 /** The last steps of a run that the line of the run is a mean over. */
 const TAIL = 10_000;
+/** The steps of a window of a long run; 0 prints no windows. */
+const WINDOW = Number(process.env.WINDOW ?? 0);
+/** Only the dumps up to this step: a long run then gives the lines of a run that ended there. */
+const UNTIL = Number(process.env.UNTIL ?? Infinity);
+/** GROUND=1: also the trail on closed ground, and the closed ground under the tubes of the longer routes. */
+const GROUND = process.env.GROUND === '1';
 const mean = (list: number[]) => list.reduce((a, b) => a + b, 0) / Math.max(list.length, 1);
 const share = (list: boolean[]) => mean(list.map(Number)).toFixed(2);
 
@@ -120,6 +138,7 @@ for (const name of names) {
   const steps = readdirSync(DIR)
     .filter((f) => f.startsWith(name + '-trail-') && f.endsWith('.f32.b64'))
     .map((f) => Number(/-trail-(\d+)\.f32\.b64$/.exec(f)?.[1]))
+    .filter((step) => step <= UNTIL)
     .sort((a, b) => a - b);
   const log = readFileSync(DIR + name + '.jsonl', 'utf8')
     .trim()
@@ -137,6 +156,9 @@ for (const name of names) {
     /** Corn maze: the routes with a tube and the routes that carry flow, each by its number of rooms. */
     routes: number[];
     flowRoutes: number[];
+    /** GROUND: of the cells with a tube off the route, the share on closed ground; the closed share of each detour. */
+    offClosed: number;
+    detours: number[];
   }[] = [];
   for (const step of steps) {
     const trail = read(`${name}-trail-${String(step)}.f32.b64`);
@@ -152,12 +174,16 @@ for (const name of names) {
       }
     const level = (2 * sum) / open;
     const strong = (c: number) => world.open[c] === 1 && trail[c]! > level;
+    let closedOff = 0;
     for (let c = 0; c < n; c++)
       if (strong(c)) {
         all++;
         if (z.path[c]) on++;
+        else if (d[c]! < FLOW.half) closedOff++;
       }
     const onRoute = on / Math.max(all, 1);
+    const offClosed = closedOff / Math.max(all - on, 1);
+    const detours: number[] = [];
     const per = (field: Float32Array, cells: number[], route: number) =>
       cells.reduce((s, c) => s + field[c]!, 0) / cells.length / Math.max(route, 1e-9);
     const shares = blind.map((cells) => per(trail, cells, m.trailPath));
@@ -175,9 +201,25 @@ for (const name of names) {
         maze.all.filter((r) => r.every((a, k) => k === 0 || holds(r[k - 1]!, a))).map((r) => r.length - 1);
       [routesNow, flowNow] = [through(tube), through(flows)];
       extra = `routes ${routesNow.join(',') || '-'} doors ${String(count(tube))} flowRoutes ${flowNow.join(',') || '-'} flowDoors ${String(count(flows))}`;
+      if (GROUND) {
+        const first = new Set(maze.all[0]);
+        for (const r of maze.all.slice(1).filter((list) => routesNow.includes(list.length - 1))) {
+          const off = new Set(r.filter((a) => !first.has(a)));
+          let [cells, closed] = [0, 0];
+          for (let c = 0; c < n; c++)
+            if (world.open[c] && off.has(maze.roomOf(c))) {
+              cells++;
+              if (d[c]! < FLOW.half) closed++;
+            }
+          detours.push(closed / Math.max(cells, 1));
+        }
+        const list = routesNow.filter((l) => l !== (maze.all[0]?.length ?? 0) - 1);
+        extra += ` detours ${list.map((l, k) => `${String(l)}:${(detours[k] ?? 0).toFixed(2)}`).join(',') || '-'}`;
+      }
     } else {
       extra = `blind ${shares.map((s) => s.toFixed(2)).join(',')} blindFlow ${flowShares.map((s) => s.toFixed(2)).join(',')}`;
     }
+    if (GROUND) extra += ` offClosed ${offClosed.toFixed(2)}`;
     rows.push({
       step,
       joined: m.joined,
@@ -188,6 +230,8 @@ for (const name of names) {
       blindFlow: flowShares,
       routes: routesNow,
       flowRoutes: flowNow,
+      offClosed,
+      detours,
     });
     writePng(`${DIR}${name}-trail-${String(step)}.png`, w, h, picture(world, trail, 12), 2);
     console.log(
@@ -232,5 +276,27 @@ for (const name of names) {
       `no flow in a blind branch from ${String(from((r) => r.blindFlow.every((v) => v < 0.1)))}`,
     );
   }
+  if (GROUND) {
+    lines.push(`offClosed ${mean(tail.map((r) => r.offClosed)).toFixed(2)}`);
+    const shares = tail.flatMap((r) => r.detours);
+    if (maze)
+      lines.push(
+        `closed ground of ${String(shares.length)} detours with a tube: at least ${Math.min(1, ...shares).toFixed(2)}`,
+      );
+  }
   console.log(`${name} run: ${lines.join('; ')}`);
+  for (let from = 0; WINDOW > 0 && from < end; from += WINDOW) {
+    const part = rows.filter((r) => r.step > from && r.step <= from + WINDOW);
+    if (part.length === 0) continue;
+    const blindAll = part.flatMap((r) => r.blind);
+    const shortest = (maze?.all[0]?.length ?? 0) - 1;
+    const scene = maze
+      ? `tube on another route ${share(part.map((r) => r.routes.some((l) => l !== shortest)))}; ` +
+        `flow on the shortest alone ${share(part.map((r) => alone(r.flowRoutes)))}`
+      : `blind ${mean(blindAll).toFixed(3)}; blind 0.10 or more ${share(blindAll.map((v) => v >= 0.1))}`;
+    console.log(
+      `${name} window ${String(from + WINDOW)}: joined ${share(part.map((r) => r.joined))}; ` +
+        `onRoute ${mean(part.map((r) => r.onRoute)).toFixed(2)}; ${scene}`,
+    );
+  }
 }

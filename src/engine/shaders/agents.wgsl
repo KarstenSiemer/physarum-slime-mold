@@ -44,6 +44,42 @@ struct FlowRule {
 const STARVE = 9u; // streams 4 to 6: growth.wgsl; 7 and every 7 + k · 65536: the start (init.wgsl)
 const RESPAWN = 8u;
 //#endif
+//#if TERRITORY
+
+// The territory of each strain (ADR 0068, territory.wgsl), as the push of the step before left it: one byte per cell,
+// 4 cells to a texel, with bit s while the cell lies in the territory of strain s. While the rules of stage 4 run, an
+// agent moves and comes to life only onto a cell of the territory of its strain. The lines between `//#if TERRITORY`
+// and `//#endif` are part of the source only then (variant.ts), and always with those of the flow; without them the
+// source is the one of the code before, character for character.
+@group(0) @binding(14) var territory: texture_2d<u32>;
+
+// Whether the cell at q (cellXY()) lies in the territory of strain s; never outside a closed arena.
+fn inTerritoryAt(q: vec2i, s: u32) -> bool {
+  if (q.x < 0) { return false; }
+  let texel = textureLoad(territory, vec2i(q.x >> 2u, q.y), 0).x;
+  return ((texel >> (8u * u32(q.x & 3))) & (1u << s)) != 0u;
+}
+
+// The same for the index of a cell, or −1.
+fn inTerritory(c: i32, s: u32) -> bool { return c >= 0 && inTerritoryAt(cellCoord(u32(c)), s); }
+
+// The pressure of the four lanes of the flow of each strain, a layer per strain, as the flow of the step before left it
+// (flow.wgsl). While the rules of stage 4 run, a sensor reads it as a repellent, with the drift of the strain (ADR 0070;
+// ADR 0065, decision 6): the plasm streams down the pressure, to the sinks of the growth front.
+@group(0) @binding(15) var pressure: texture_2d_array<f32>;
+// What the sink of each cell takes over the conductivity of the cell, take / G, a layer per strain, from the flow of
+// the step before (flow.wgsl `takes`, ADR 0075): 0 at a cell without a tube and while the front takes no flux.
+@group(0) @binding(16) var takes: texture_2d_array<f32>;
+// The state of the sinks of every strain (sinks.wgsl `state`), with the budget B of the paid births in y of the second
+// vec4 of a strain, then the counts of each strain (paid.ts PAID_COUNTS), which every step clears (ADR 0100). The keys
+// of growth follow them; no agent pass reads them. The sensors read the covered foods of each strain (driftOf()).
+struct Paid {
+  states: array<vec4f, 8>,
+  counts: array<atomic<u32>, 40>,
+}
+@group(0) @binding(17) var<storage, read_write> paid: Paid;
+const PAY_RESPAWN = 13u; // the draw of a respawn that waits for the budget (paid.ts PAY_RESPAWN)
+//#endif
 
 // Separate random streams, so a tool or shrinkage never shifts the steering draws.
 const STEER = 0u;
@@ -143,7 +179,11 @@ fn clearPath(p: vec2f, q: vec2f, clear: i32) -> bool {
 
 // What the sensor at p of an agent at pos reads for strain s. A wall, a cell outside a closed arena and a wall
 // between the agent and the sensor read BLOCKED (ADR 0020). `clear` is the agent's clearance (clearPath).
+//#if TERRITORY
+fn sensed(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
+//#else
 fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
+//#endif
   // The coordinates and the index of the cell from one wrap: cellCoord() of the index would divide.
   let q = cellXY(vec2i(floor(p)));
   let c = indexOf(q);
@@ -153,15 +193,67 @@ fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32) -> f32 {
   if (SATURATE) { t = t / (1.0 + t / P.model.x); }
   return dot(t, P.attraction[s]) + P.food[s] * sc.x - P.light[s] * sc.y;
 }
+//#if TERRITORY
+
+// The mean pressure of the four lanes of the flow of strain s at the cell q.
+fn meanPressure(q: vec2i, s: u32) -> f32 {
+  let pr = textureLoad(pressure, q, s, 0);
+  return (pr.x + pr.y + pr.z + pr.w) * 0.25;
+}
+
+// Whether the cell q holds a tube of strain s: a conductivity above 0, as the update of the flow of the step before
+// left it.
+fn tubeAt(q: vec2i, s: u32) -> bool { return textureLoad(flowMemory, q, s, 0).z > 0.0; }
+
+// What the cell of an agent of strain s gives its sensors while the rules of stage 4 run (ADR 0075; ADR 0074, the form
+// `take`): whether it holds a tube of s, and `ground`, what a sensor on a cell without a tube of s reads: the mean
+// pressure of the agent's cell less the sensor offset `so` times take / G there. Fresh ground holds no pressure of its
+// own, and the flux that the sink of the cell takes would fall by take / G per cell beyond it. And `weight`, the drift
+// of one food (ADR 0100, part B): the drift of the strain over the foods that its last flow pass covered, at least one
+// (lane w of the first vec4 of its state, sinks.wgsl `state`), so that the drift reads the pressure of one food.
+struct Drift {
+  on: bool,
+  ground: f32,
+  weight: f32,
+}
+
+fn driftOf(pos: vec2f, s: u32, so: f32) -> Drift {
+  let q = cellXY(vec2i(floor(pos)));
+  if (q.x < 0 || !tubeAt(q, s)) { return Drift(false, 0.0, 0.0); }
+  let weight = P.drift[s] / max(1.0, paid.states[s * 2u].w);
+  return Drift(true, meanPressure(q, s) - so * textureLoad(takes, q, s, 0).x, weight);
+}
+
+// What the sensor at p reads while the rules of stage 4 run (ADR 0070; ADR 0075): what it reads without them, minus
+// the drift of one food (`d.weight`) times the mean pressure of the four lanes of its flow at the cell of the sensor if that cell
+// holds a tube of the strain, else times the ground of the agent's cell `d`. An agent on a cell without a tube of its
+// strain reads no drift. A blocked sensor stays blocked, and its cell is not read.
+fn sense(pos: vec2f, p: vec2f, s: u32, clear: i32, d: Drift) -> f32 {
+  let read = sensed(pos, p, s, clear);
+  if (read == BLOCKED || !d.on) { return read; }
+  let q = cellXY(vec2i(floor(p)));
+  var v = d.ground;
+  if (tubeAt(q, s)) { v = meanPressure(q, s); }
+  return read - d.weight * v;
+}
+//#endif
 
 // Sense and rotate (Jones 2010, Fig. 3), then the random turn pCD. Returns the new heading.
 fn steer(a: Agent, s: u32, rng: ptr<function, u32>, clear: i32) -> f32 {
   let sa = P.sensorAngle[s];
   let so = P.sensorOffset[s];
   let ra = P.rotationAngle[s];
+//#if TERRITORY
+  // The cell of the agent, read once for its three sensors (ADR 0075).
+  let d = driftOf(a.pos, s, so);
+  let f = sense(a.pos, a.pos + so * dir(a.heading), s, clear, d);
+  let l = sense(a.pos, a.pos + so * dir(a.heading - sa), s, clear, d);
+  let r = sense(a.pos, a.pos + so * dir(a.heading + sa), s, clear, d);
+//#else
   let f = sense(a.pos, a.pos + so * dir(a.heading), s, clear);
   let l = sense(a.pos, a.pos + so * dir(a.heading - sa), s, clear);
   let r = sense(a.pos, a.pos + so * dir(a.heading + sa), s, clear);
+//#endif
   var h = a.heading;
   if (f > l && f > r) {
     // keep heading
@@ -256,6 +348,10 @@ fn respawn(a: Agent, id: u32) -> Spot {
   let q = cellXY(vec2i(floor(p)));
   let c = indexOf(q);
   if (!openCell(c)) { return none; }
+//#if TERRITORY
+  // While the rules of stage 4 run, only onto the territory of the agent's strain (ADR 0068). No draw.
+  if (!inTerritoryAt(q, a.bits & 3u)) { return none; }
+//#endif
   let m = textureLoad(flowMemory, q, a.bits & 3u, 0);
   if (m.y < F.c.z || rand(&rng) >= F.e.z * (m.x - F.e.w) / (1.0 - F.e.w)) { return none; }
   return Spot(wrapPos(p), rand(&rng) * TAU, c);
@@ -361,6 +457,10 @@ fn destination(a: Agent) -> vec2f { return a.pos + P.stepSize[a.bits & 3u] * dir
 
 // A move needs a free target: habitable, empty at the start of the step, and no wall on the way.
 fn canClaim(a: Agent, c: i32, clear: i32) -> bool {
+//#if TERRITORY
+  // While the rules of stage 4 run, also a cell of the territory of the agent's strain (ADR 0068).
+  if (!inTerritory(c, a.bits & 3u)) { return false; }
+//#endif
   return habitable(c) && c != cellOf(a.pos) && occ[c] == 0u && clearPath(a.pos, destination(a), clear);
 }
 
@@ -370,9 +470,24 @@ fn claim(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gro
   if (i >= P.grid.z) { return; }
   var a = agents[i];
   let id = agentId(a);
+//#if TERRITORY
+  let found = a;
+//#endif
   let alive = shrinkage(&a, id);
+//#if TERRITORY
+  // While the rules of stage 4 run, a death that the model makes gives its plasm back to the budget (ADR 0100); the cut
+  // and a wall take it away (removed()).
+  if ((found.bits & ALIVE) != 0u && !alive && !removed(found)) { atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 4u], 1u); }
+//#endif
   let spot = placement(a, id);
+//#if TERRITORY
+  if (spot.cell >= 0 && respawns(a, id)) {
+    // A respawn waits for the budget: `pay` draws for it (ADR 0100).
+    atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 2u], 1u);
+  } else if (spot.cell >= 0) {
+//#else
   if (spot.cell >= 0) {
+//#endif
     // A tool's spot is claimed like a move; the agent stays as it is until `settle`.
     atomicMax(&claims[spot.cell], key(id));
   } else if (alive) {
@@ -430,6 +545,49 @@ fn settle(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) gr
   }
   flushTally(li);
 }
+
+//#if TERRITORY
+// Whether the spot of the dead agent a is a respawn of the flow, and not a dab of the tool Inoculate (placement()):
+// the test of the tool with its draws, which placement() makes first.
+fn respawns(a: Agent, id: u32) -> bool {
+  if ((a.bits & ALIVE) != 0u) { return false; }
+  if (P.tool.w != 1.0 || f32(a.bits & 3u) != P.tool2.x) { return true; }
+  var rng = rngSeed(id, TOOL);
+  if (rand(&rng) >= P.tool2.y) { return true; }
+  return !openCell(cellOf(randomIn(P.tool.xy, P.tool.z, &rng)));
+}
+
+// The respawns that the budget pays (ADR 0100), after `claim`: while the rules of stage 4 run, each of the n respawns
+// of strain s that `claim` counted claims its cell with the chance min(1, max(0, B) / n), B the budget of s before the
+// step and a draw of its own. The others stay dead and draw again in the next step.
+@compute @workgroup_size(256)
+fn pay(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
+  let i = index(gid, groups);
+  if (i >= P.grid.z) { return; }
+  let a = agents[i];
+  let id = agentId(a);
+  let spot = placement(a, id);
+  if (spot.cell < 0 || !respawns(a, id)) { return; }
+  let s = a.bits & 3u;
+  let waiting = atomicLoad(&paid.counts[s * 10u + 2u]);
+  let chance = min(1.0, max(0.0, paid.states[s * 2u + 1u].y) / f32(waiting));
+  var rng = rngSeed(id, PAY_RESPAWN);
+  if (rand(&rng) < chance) { atomicMax(&claims[spot.cell], key(id)); }
+}
+
+// The respawns that came to life (ADR 0100), after `pay` and before `settle`: a respawn whose key its cell holds. Each
+// costs one from the budget. A pass of its own, because `settle` binds as many storage buffers as a pass may.
+@compute @workgroup_size(256)
+fn reborn(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
+  let i = index(gid, groups);
+  if (i >= P.grid.z) { return; }
+  let a = agents[i];
+  let id = agentId(a);
+  let spot = placement(a, id);
+  if (spot.cell < 0 || !respawns(a, id) || atomicLoad(&claims[spot.cell]) != key(id)) { return; }
+  atomicAdd(&paid.counts[(a.bits & 3u) * 10u + 3u], 1u);
+}
+//#endif
 
 // Rebuilds occupancy from positions (after init or when collisions are switched on).
 @compute @workgroup_size(256)

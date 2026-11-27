@@ -4,12 +4,25 @@
 // Agent bits of a parent that divides in this step (growth.frag PASS 2): GROWS, and the neighbour in bits 7 to 9.
 const uint GROWS = 64u;
 const uint DIR_SHIFT = 7u;
+// Agent bits of the births that the flux pays in a growth step (ADR 0071): FRONT for an agent of the front (PASS 2),
+// PAID with GROWS for a paid parent (PASS 5). PASS 4 clears them with the other bits of the step.
+const uint FRONT = 1024u;
+const uint PAID = 2048u;
+// With the rules of stage 4 (ADR 0100): JONES with the neighbour in bits 7 to 9 for a parent of Jones' rule that waits
+// for the budget (PASS 2), which PASS 6 turns into GROWS; CROWDED for an agent that shrinkage deletes (PASS 2); BORN for
+// a child (PASS 4). paid.vert counts them.
+const uint JONES = 32768u;
+const uint CROWDED = 65536u;
+const uint BORN = 131072u;
+const uint DIRS = 7u << DIR_SHIFT;
 
 // Random streams of their own, as in growth.wgsl.
 const uint GROW = 4u;
 const uint BIRTH = 5u;
 const uint PLACE_ORDER = 6u;
 const uint SHADE = 10u;
+const uint PAID_KEY = 12u;
+const uint PAY_JONES = 14u;
 
 bool growthTest() { return P.growth.x > 0u && P.grid.w % P.growth.x == 0u; }
 bool shrinkTest() { return P.shrinkage.x > 0u && P.grid.w % P.shrinkage.x == 0u; }

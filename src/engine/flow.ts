@@ -24,8 +24,13 @@ export const STEPS_PER_MINUTE = 30;
  * The constants of the rule. Each one with its source or its measurement is in ADR 0029.
  * - `gamma`: the exponent of f(Q) = Q^gamma / (1 + Q^gamma) (Tero et al. 2010, Fig. 4: 1.8).
  * - `rate`: a cell's flow memory D moves this share of the way to f(Q) per step: 333 steps, 11 min.
- * - `recover`: the flow memory of ground without a tube grows by this share per step, up to `fresh`.
- * - `base`: conductivity of a tube without flow memory; `food`: conductivity of a food cell.
+ * - `recover`: the flow memory of ground without a tube grows by this share per step, up to `fresh`: from `floor` to
+ *   `fresh` in 6 days, and to `half`, where ground is open for births again, in 3.7 days (ADR 0054; an eighth of the
+ *   share of ADR 0029, decision 19). A starved tube that vanishes leaves its ground at `floor` (flow.wgsl update).
+ *   This is the share at the default of the setting Slime life time, 144 hours; recoverShare() gives the share of the
+ *   settings (ADR 0055, decision 5).
+ * - `base`: conductivity of a tube without flow memory, the default of the setting Base conductance (`flowBase`, ADR
+ *   0086), which packFlow() packs in its place; `food`: conductivity of a food cell.
  * - `ghost`: a conductivity that every open cell has for the pressure only, so that a cell beside the network holds
  *   the pressure of its neighbours before it joins.
  * - `weight`, `radius`: the damped Jacobi iteration and the spectral radius that its acceleration is tuned for. Only
@@ -45,7 +50,7 @@ export const STEPS_PER_MINUTE = 30;
 export const FLOW = {
   gamma: 1.8,
   rate: 0.003,
-  recover: 0.00023,
+  recover: 0.00002875,
   base: 0.02,
   food: 4,
   ghost: 1e-5,
@@ -65,6 +70,21 @@ export const FLOW = {
   headSoft: 0.25,
 } as const;
 
+/**
+ * Whether the flow of the settings runs over 8 neighbours (ADR 0086): the setting, while the flow runs. The passes then
+ * compile the lines of EIGHT (flow.wgsl, flow.frag, tubes.wgsl, tubes.frag).
+ */
+export const flowEight = (s: Pick<Settings, 'flow' | 'model' | 'flowEdges'>) => flowOn(s) && s.flowEdges === 8;
+
+/**
+ * The weights of the edges of a cell with the flow over 8 neighbours (ADR 0086, the form of ADR 0081): an axis edge
+ * conducts `axis` times the harmonic mean of its two cells, a diagonal edge `diag` times. Their ratio 1/√2 lets a broad
+ * uniform flow read the same flux at 0° and at 45° (and at most 1.08 times more between, at 22.5°), and a vein of one
+ * cell conduct the same along an axis and along a diagonal; axis + 2 · diag = 1 keeps the conductance of a uniform
+ * sheet. The passes hold them as float32 literals, AXIS and DIAG; a test holds the literals to these numbers.
+ */
+export const FLOW_EIGHT = { axis: Math.SQRT2 - 1, diag: 1 - Math.SQRT1_2 } as const;
+
 /** Pressure iterations per step, the pressure fields that run side by side, and the steps that a field keeps its roles. */
 export const FLOW_ITERATIONS = 16;
 export const FLOW_LANES = 4;
@@ -75,9 +95,18 @@ export const FLOW_HOLD = 300;
  */
 export const FLOW_SITES = 64;
 
-/** Slots of 16 bytes in the uniform block `Flow` (flow.wgsl, flow.frag): seven of constants, then the sites. */
+/**
+ * Slots of 16 bytes in the uniform block `Flow` (flow.wgsl, flow.frag): seven of constants, then the sites, then the
+ * constants of the rules of stage 4 (ADR 0067, decision 9; territory.ts packTerritory()): 2 slots of the push, then 1
+ * of the sinks (FLOW_SINK_SLOT; sinks.ts packSinks()), then 1 of what the sinks take (FLOW_TAKE_SLOT; ADR 0070). The
+ * passes of the flow read the block up to the sites; only the passes of stage 4 read the slots after them.
+ */
 export const FLOW_CONSTANT_SLOTS = 7;
-export const FLOW_SLOTS = FLOW_CONSTANT_SLOTS + FLOW_SITES;
+export const FLOW_TERRITORY_SLOT = FLOW_CONSTANT_SLOTS + FLOW_SITES;
+export const FLOW_SINK_SLOT = FLOW_TERRITORY_SLOT + 2;
+export const FLOW_TAKE_SLOT = FLOW_SINK_SLOT + 1;
+export const FLOW_TERRITORY_SLOTS = 4;
+export const FLOW_SLOTS = FLOW_TERRITORY_SLOT + FLOW_TERRITORY_SLOTS;
 export const FLOW_BYTES = FLOW_SLOTS * 16;
 
 /** PCG hash of common.wgsl and common.glsl. */
@@ -155,16 +184,37 @@ export function trailLevels(
 }
 
 /**
+ * The Slime life time in hours for which `FLOW.recover` is the share of the mark of starved ground: 144, the 6 days of
+ * ADR 0054. It is the default of the setting (a test checks it), but the rule holds the number: another default must
+ * not change the time that a life time gives the mark.
+ */
+const RECOVER_LIFE = 144;
+
+/**
+ * The share by which the flow memory of ground without a tube grows per step (ADR 0055, decision 5): the setting Slime
+ * life time gives the mark of starved ground its time. `FLOW.recover` times 144 / the life time in hours, so the mark
+ * fades in about the life time. The division comes first: at 144 hours it gives 1, and the share is `FLOW.recover`
+ * bit for bit, so a scene keeps its bytes; at 18 hours it gives 8, the share of ADR 0029, decision 19 (0.00023).
+ * Without slime, at a life time of 0, the mark keeps the share of ADR 0054, `FLOW.recover`.
+ */
+export function recoverShare(s: Pick<Settings, 'slimeLife'>): number {
+  return s.slimeLife > 0 ? FLOW.recover * (RECOVER_LIFE / s.slimeLife) : FLOW.recover;
+}
+
+/**
  * The uniform block of the flow passes of the strain `strain` (ADR 0031): the constants, the first cell of the first
  * site (the passes recentre the pressure by it while no site gives or takes, flow.wgsl referenceCell()), the strain,
  * the blocks of the list of cells, and the sites: per site its first cell and the run of its cells in the list of
  * cells (sites.ts FlowSites). The
  * passes take the step and the seed from the parameters of the simulation. The levels of the trail are those of the
  * strain (trailLevels()). Every strain has the same sites and the same other constants: the agent passes read the
- * constants from the block of any strain, and the pass of the ports reads the sites from the block of the first.
+ * constants from the block of any strain, and the pass of the ports reads the sites from the block of the first. The
+ * base conductance is the setting (ADR 0086). The last lane of the slot of the pressure limit is 1 while the flow runs
+ * over 8 neighbours (ADR 0086), else 0: the passes compile the lines of EIGHT for it (flowEight()), and the CPU copy
+ * (flow-reference.ts) reads it here.
  */
 export function packFlow(
-  s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder'>,
+  s: Pick<Settings, 'flowStrength' | 'strains' | 'stepOrder' | 'slimeLife' | 'flowEdges' | 'flowBase'>,
   sites: FlowSites,
   buf = new ArrayBuffer(FLOW_BYTES),
   strain = 0,
@@ -175,14 +225,14 @@ export function packFlow(
   const omega = 2 / (1 + Math.sqrt(1 - FLOW.radius * FLOW.radius));
   const n = Math.min(sites.list.length, FLOW_SITES);
   const limit = FLOW.head * s.flowStrength;
-  f.set([s.flowStrength, FLOW.gamma, FLOW.rate, FLOW.recover], 0);
-  f.set([FLOW.base, FLOW.food, FLOW.ghost, omega], 4);
+  f.set([s.flowStrength, FLOW.gamma, FLOW.rate, recoverShare(s)], 0);
+  f.set([s.flowBase, FLOW.food, FLOW.ghost, omega], 4);
   f.set([FLOW.weight, FLOW.bodyRate, FLOW.bodyLow, FLOW.fresh], 8);
   f.set([FLOW.floor, low, 1 / (full - low), n], 12);
   f.set([FLOW.death, FLOW.half * FLOW.half, FLOW.birth, FLOW.birthFrom], 16);
   const ref = sites.list[0];
   f.set([ref?.x ?? 0, ref?.y ?? 0, strain, sites.cells.length / SITE_BLOCK], 20);
-  f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), 0], 24);
+  f.set([FLOW_HOLD, limit, 1 / (FLOW.headSoft * limit), s.flowEdges === 8 ? 1 : 0], 24);
   for (let i = 0; i < n; i++) {
     const site = sites.list[i];
     if (site) f.set([site.x, site.y, site.offset, site.count], FLOW_CONSTANT_SLOTS * 4 + i * 4);

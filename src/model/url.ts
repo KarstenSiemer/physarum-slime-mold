@@ -61,16 +61,32 @@ async function inflate(encoded: string): Promise<Uint8Array> {
 
 /**
  * The settings as a link holds them. The mean window is in it only when it is not 3 × 3 (ADR 0046), and the electrode
- * strength only when it is not 1 (ADR 0047), and Light stops growth only when it is not 0 (ADR 0050): a link made
- * before these settings holds none of them, and sanitize() reads a link without them as 3 × 3, 1 and 0, so the link
- * runs as it was made. The default of Light stops growth is 1, so a link of the extended model made now holds it; a
- * link of the Jones model holds none: the model does not have the rule.
+ * strength only when it is not 1 (ADR 0047), and Light stops growth only when it is not 0 (ADR 0050), and Slime life
+ * time only when it is not 0 (ADR 0055): a link made before these settings holds none of them, and sanitize() reads a
+ * link without them as 3 × 3, 1, 0 and 0, so the link runs as it was made. The defaults of Light stops growth and of
+ * Slime life time are 1 and 144, so a link of the extended model made now holds them; a link of the Jones model holds
+ * none: the model has neither rule. The rules of stage 4 are in it only when they are on (ADR 0068), and so are their
+ * drift (ADR 0070), the flux of their front (ADR 0086), their weight on slime and their reach to fresh ground (ADR
+ * 0088), so a link without them is the link of before them. The neighbours and the base conductance of the flow are
+ * in it only while the flow is on (ADR 0086): a link without them runs with 4 neighbours and 0.02, as it was made.
  */
 function linkSettings(s: Settings): Partial<Settings> {
   const held: Partial<Settings> = { ...s };
   if (s.meanWindow === MEAN_WINDOW) delete held.meanWindow;
+  if (!s.flow) {
+    delete held.flowEdges;
+    delete held.flowBase;
+  }
+  if (!s.territory) {
+    delete held.territory;
+    delete held.drift;
+    delete held.frontFlux;
+    delete held.slimeWeight;
+    delete held.freshReach;
+  }
   if (s.electrodeStrength === defaultSettings().electrodeStrength) delete held.electrodeStrength;
   if (s.lightGrowth === 0 || s.model === 'jones') delete held.lightGrowth;
+  if (s.slimeLife === 0 || s.model === 'jones') delete held.slimeLife;
   return held;
 }
 

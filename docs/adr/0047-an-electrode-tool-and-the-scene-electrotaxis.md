@@ -5,6 +5,9 @@
 - Date: 2026-11-15
 - Extends ADR 0021 (the drawing of a link: version 4), ADR 0022 (the Jones and the extended model), ADR 0037 (links to
   the figures of the papers), ADR 0044 (a repellent source in the Jones model) and ADR 0046 (the mean window).
+- Extended by [ADR 0058](0058-the-outlines-and-the-surface-of-the-electrodes.md) (2026-11-17): decision 8, the view
+  of a pole, changes. The outline of a pole comes from the distances of its strokes, in a buffer of 4 B per cell, and
+  a pole is a lit stud that covers all of what lies below it. So "It costs no memory" holds for the simulation only.
 
 ## Context
 

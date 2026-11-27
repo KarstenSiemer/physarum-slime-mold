@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, defaultStrain } from '../model/params';
+import { defaultSettings, defaultStrain, type Settings } from '../model/params';
 import {
   agentCount,
   BYTES_PER_AGENT,
@@ -15,6 +15,18 @@ import {
   SITE_BYTES_PER_CELL,
   gridSize,
   memoryBudget,
+  PAID_BYTES_PER_AGENT,
+  paidBytesPerAgent,
+  SINK_BYTES_PER_CELL,
+  SINK_BYTES_PER_CELL_GL,
+  sinkBytesPerCell,
+  DRIFT_BYTES_PER_CELL_GL,
+  driftBytesPerCell,
+  sinkLevels,
+  SLIME_BYTES_PER_CELL,
+  slimeBytesPerCell,
+  TERRITORY_BYTES_PER_CELL,
+  territoryBytesPerCell,
   TUBE_MAP_BYTES_PER_CELL_GL,
   tubesBytesPerCell,
   VIEW_BYTES_PER_CELL,
@@ -69,7 +81,7 @@ describe('memory budget', () => {
   it('counts the bytes per cell of the backend', () => {
     const s = defaultSettings();
     const [w, h] = gridSize(s.resolution, 16 / 10);
-    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL); // 1536 just fits at BYTES_PER_CELL (98 B)
+    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL); // 1536 just fits at BYTES_PER_CELL (102 B)
     expect(fitResolution(s, 16 / 10, { ...roomy, budget })).toBe(s.resolution);
     const halfFloat = { ...roomy, budget, bytesPerCell: BYTES_PER_CELL_HALF_FLOAT };
     expect(fitResolution(s, 16 / 10, halfFloat)).toBeLessThan(s.resolution);
@@ -198,5 +210,134 @@ describe('the flow in the tubes', () => {
     expect(tubesBytesPerCell({ ...on, flow: false }, TUBE_MAP_BYTES_PER_CELL_GL)).toBe(0);
     expect(tubesBytesPerCell({ ...on, flow: false })).toBe(0);
     expect(tubesBytesPerCell({ ...on, model: 'jones' })).toBe(0);
+  });
+});
+
+// ADR 0058: the outline distances of the electrodes are 4 B per cell on both backends. The fit counts them from the
+// start, with a pole or without one, so that a stroke of a pole never changes the grid.
+describe('the outline distances of the electrodes', () => {
+  it('are 4 of the bytes per cell of every backend', () => {
+    // 98 and 118 before them (ADR 0047).
+    expect(BYTES_PER_CELL).toBe(102);
+    expect(BYTES_PER_CELL_HALF_FLOAT).toBe(122);
+    // On 2048 × 1280 cells they are 10 MiB.
+    const [w, h] = gridSize(2048, 1.6);
+    expect(estimateBytes(w, h, 1000, BYTES_PER_CELL) - estimateBytes(w, h, 1000, 98)).toBe(10 * 2 ** 20);
+  });
+});
+
+// ADR 0055, decision 9, ADR 0057 and ADR 0060: per cell the slime field holds a stamp, an amount and a front stamp of
+// 4 B each, and the renderer holds the maps of the film, 2.5 B, and the map of the growth front, 16 B per texel of
+// 64 cells, on both backends: 14.75 B, counted as 15.
+describe('the slime field', () => {
+  it('holds 15 B per cell with its picture, which the memory estimate counts per cell', () => {
+    expect(SLIME_BYTES_PER_CELL).toBe(15);
+    expect(SLIME_BYTES_PER_CELL).toBe(Math.ceil(4 + 4 + 4 + 2 + 2 / 4 + 16 / 64));
+    const [w, h] = gridSize(1536, 1.6);
+    const without = estimateBytes(w, h, 1000);
+    expect(estimateBytes(w, h, 1000, BYTES_PER_CELL + SLIME_BYTES_PER_CELL) - without).toBe(w * h * 15);
+    // The grid of the default settings: 21.1 MiB more.
+    expect((w * h * SLIME_BYTES_PER_CELL) / 2 ** 20).toBeCloseTo(21.094, 3);
+  });
+
+  // The setting changes no grid: the fit counts the field in the extended model with slime and without it.
+  it('is counted in the extended model with a life time above 0 and with 0, and not in the Jones model', () => {
+    const extended: Settings = { ...defaultSettings(), model: 'extended' };
+    expect(extended.slimeLife).toBe(144);
+    expect(slimeBytesPerCell(extended)).toBe(15);
+    // Without slime, with the longest life time, and with the flow.
+    const others: Settings[] = [
+      { ...extended, slimeLife: 0 },
+      { ...extended, slimeLife: 240 },
+      { ...extended, flow: true },
+    ];
+    for (const s of others) expect(slimeBytesPerCell(s), `${String(s.slimeLife)} h`).toBe(15);
+    expect(slimeBytesPerCell({ model: 'jones' })).toBe(0);
+  });
+
+  it('lowers a grid that just fits without it', () => {
+    const s = defaultSettings();
+    const [w, h] = gridSize(s.resolution, 16 / 10);
+    const budget = estimateBytes(w, h, s.density * w * h, BYTES_PER_CELL);
+    const limits = { ...roomy, budget };
+    expect(fitResolution(s, 16 / 10, limits)).toBe(s.resolution);
+    const withSlime = { ...limits, bytesPerCell: BYTES_PER_CELL + slimeBytesPerCell(s) };
+    expect(fitResolution(s, 16 / 10, withSlime)).toBeLessThan(s.resolution);
+    // The bytes of the field and its picture and no more: the budget with 15 B more per cell holds the grid again.
+    const more = { ...withSlime, budget: budget + w * h * SLIME_BYTES_PER_CELL };
+    expect(fitResolution(s, 16 / 10, more)).toBe(s.resolution);
+  });
+});
+
+describe('the territory of the rules of stage 4 (ADR 0068)', () => {
+  const on: Settings = { ...defaultSettings(), territory: true, flow: true, growth: true, collisions: true };
+
+  it('counts two copies of the territory and the owners, one byte per cell each, while the rules run', () => {
+    expect(TERRITORY_BYTES_PER_CELL).toBe(3);
+    expect(territoryBytesPerCell(on)).toBe(3);
+    // The rules need growth, one agent per cell, the flow and the extended model, as territoryOn() says.
+    const off: Settings[] = [
+      { ...on, territory: false },
+      { ...on, flow: false },
+      { ...on, growth: false },
+      { ...on, collisions: false },
+      { ...on, model: 'jones' },
+    ];
+    for (const s of off) expect(territoryBytesPerCell(s)).toBe(0);
+  });
+
+  it('lowers a grid that just fits without it', () => {
+    const [w, h] = gridSize(on.resolution, 16 / 10);
+    const budget = estimateBytes(w, h, on.density * w * h, BYTES_PER_CELL);
+    const limits = { ...roomy, budget };
+    const withTerritory = { ...limits, bytesPerCell: BYTES_PER_CELL + territoryBytesPerCell(on) };
+    expect(fitResolution(on, 16 / 10, withTerritory)).toBeLessThan(on.resolution);
+    const more = { ...withTerritory, budget: budget + w * h * TERRITORY_BYTES_PER_CELL };
+    expect(fitResolution(on, 16 / 10, more)).toBe(on.resolution);
+  });
+
+  it('counts the sinks per strain: one rate on WebGPU, two and the pyramid of the sums on WebGL2 (ADR 0069)', () => {
+    // On WebGPU with take / G of each cell, which the sensors read (ADR 0075).
+    expect(SINK_BYTES_PER_CELL).toBe(8);
+    expect(SINK_BYTES_PER_CELL_GL).toBeCloseTo(9.067, 3);
+    // The pyramid over squares of 4 × 4: 16 B per texel of a level, a sixteenth of the cells, then a sixteenth of that.
+    const [w, h] = [1024, 640];
+    const texels = sinkLevels(w, h).reduce((sum, [x, y]) => sum + x * y, 0);
+    expect((texels * 16) / (w * h)).toBeCloseTo(SINK_BYTES_PER_CELL_GL - 8, 2);
+    const three = { ...on, strains: [defaultStrain(0, 3), defaultStrain(1, 3), defaultStrain(2, 3)] };
+    expect(sinkBytesPerCell(three, SINK_BYTES_PER_CELL)).toBe(24);
+    expect(sinkBytesPerCell(three, SINK_BYTES_PER_CELL_GL)).toBeCloseTo(27.2, 1);
+    for (const s of [
+      { ...three, territory: false },
+      { ...three, flow: false },
+      { ...three, collisions: false },
+    ])
+      expect(sinkBytesPerCell(s, SINK_BYTES_PER_CELL)).toBe(0);
+  });
+
+  it('counts what the sensors read on WebGL2 apart from the strains: two targets of 16 B (ADR 0075)', () => {
+    expect(DRIFT_BYTES_PER_CELL_GL).toBe(32);
+    for (const strains of [1, 2, 3, 4]) {
+      const s = { ...on, strains: Array.from({ length: strains }, (_, i) => defaultStrain(i, strains)) };
+      expect(driftBytesPerCell(s, DRIFT_BYTES_PER_CELL_GL)).toBe(32);
+    }
+    for (const s of [
+      { ...on, territory: false },
+      { ...on, flow: false },
+      { ...on, collisions: false },
+    ])
+      expect(driftBytesPerCell(s, DRIFT_BYTES_PER_CELL_GL)).toBe(0);
+  });
+
+  it('counts the key of the births that the flux pays, 4 B per agent, while the rules run (ADR 0071)', () => {
+    expect(PAID_BYTES_PER_AGENT).toBe(4);
+    expect(paidBytesPerAgent(on)).toBe(4);
+    for (const s of [
+      { ...on, territory: false },
+      { ...on, flow: false },
+      { ...on, growth: false },
+      { ...on, collisions: false },
+    ])
+      expect(paidBytesPerAgent(s)).toBe(0);
   });
 });

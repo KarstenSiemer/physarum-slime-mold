@@ -1,56 +1,7 @@
-// Brush strokes on the environment (walls, food, light, electrodes). Prepended with common.wgsl.
-
-struct Brush {
-  a: vec2f,      // segment start (cells), inside the grid on the periodic grid (brush.ts paintSegments)
-  b: vec2f,      // segment end (cells)
-  origin: vec2i, // first cell of the paint box (brush.ts paintBox; on the periodic grid it wraps)
-  radius: f32,
-  kind: u32,     // 0 erase, 1 wall, 2 food, 3 light, 4 anode, 5 cathode
-  reach: vec2i,  // first cell of the outline box: the paint box grown by SHAPE_RANGE (sim.ts paint())
-  extent: vec2u, // the size of the outline box in cells
-}
+// Brush strokes on the environment (walls, food, light, electrodes). Prepended with common.wgsl and brush.wgsl, which
+// holds the slot of a segment (`B`), its distance to a cell (strokeDistance) and the cells of its box (boxCell).
 
 @group(0) @binding(1) var<storage, read_write> env: array<u32>;
-@group(0) @binding(2) var<uniform> B: Brush;
-
-// The point of the segment nearest to p.
-fn nearestPoint(p: vec2f) -> vec2f {
-  let ab = B.b - B.a;
-  let t = clamp(dot(p - B.a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
-  return B.a + t * ab;
-}
-
-fn segmentDistance(p: vec2f) -> f32 {
-  return distance(p, nearestPoint(p));
-}
-
-// Distance from the centre of cell q to the segment; on the periodic grid to its nearest copy, which lies at most
-// one period away for a segment from paintSegments(), as in paint.frag. `reach` is the largest distance the caller
-// needs: where the segment grown by it stays inside the grid, no copy is that near a cell of the grid, so the copies
-// are skipped. Both `paint` and `outline` measure with it, so the outline sees the cells that `paint` painted.
-fn strokeDistance(q: vec2i, reach: f32) -> f32 {
-  let p = vec2f(q) + 0.5;
-  var d = segmentDistance(p);
-  let size = vec2f(f32(W()), f32(H()));
-  let inside = all(min(B.a, B.b) - reach >= vec2f(0.0)) && all(max(B.a, B.b) + reach <= size);
-  if (P.cfg.z == 0u && !inside) {
-    for (var oy = -1; oy <= 1; oy++) {
-      for (var ox = -1; ox <= 1; ox++) { d = min(d, segmentDistance(p + vec2f(f32(ox), f32(oy)) * size)); }
-    }
-  }
-  return d;
-}
-
-// The index of cell q of a box, and q wrapped into the grid: on the periodic grid every cell of a box wraps (a box
-// spans at most one period), in a closed arena the cells outside it are −1.
-fn boxCell(cell: vec2i) -> vec3i {
-  let size = vec2i(i32(W()), i32(H()));
-  if (P.cfg.z == 0u) {
-    let q = ((cell % size) + size) % size;
-    return vec3i(q, q.y * size.x + q.x);
-  }
-  return vec3i(cell, cellAt(cell));
-}
 
 // The soft edge of light: 1 within 0.3 of the radius, 0 at the radius, Hermite between. Written out, because
 // smoothstep with its first edge above its second is undefined in GLSL ES 3.00; the same steps as lightByte() in
@@ -70,6 +21,7 @@ fn paint(@builtin(global_invocation_id) gid: vec3u) {
   let d = strokeDistance(q, B.radius);
   if (d > B.radius) { return; }
   var e = envOf(env[c]);
+  // A stroke of the Slime tool (kind 6) never comes here: it changes only the slime field (slime-paint.wgsl).
   switch B.kind {
     case 0u: { e = vec4f(0.0); }
     case 1u: { e = vec4f(1.0, 0.0, 0.0, 0.0); }
@@ -96,13 +48,38 @@ fn paint(@builtin(global_invocation_id) gid: vec3u) {
 // exactly when `env` holds the wall or food there, and no byte lies nearer an outline than the cells of
 // `env` allow. Cells outside the arena keep their bytes: `paint` leaves their `env` alone, and a later
 // boundary may count them again.
+//
+// The electrodes have a buffer of their own in the same format (POLES, ADR 0058): `shape` has no byte left for them.
+// Its first byte holds the distance to the outline of the cathodes and its second byte the one to the outline of the
+// anodes; the other two stay 0. A cell of `env` holds one pole, the one painted last (`paint`). So a cathode stroke is
+// for the two poles what a wall stroke is for walls and food: a union with the cathodes and a subtraction from the
+// anodes. An anode stroke is the mirror, and an erase and a wall subtract from both. The same code writes both
+// buffers; `outline` says where the subtraction of a pole and of a wall differs.
 
 @group(0) @binding(3) var<storage, read_write> shape: array<u32>;
+
+// True in the pipelines that write the outlines of the electrodes: binding 3 then holds their buffer, and the two
+// layers of a cell of `env` are the cathode and the anode (layersOf()). A condition fixed for the pipeline: the
+// pipelines of walls and food hold none of its code.
+override POLES: bool = false;
 
 const SHAPE_RANGE = 4.0; // cells; SHAPE_RANGE in sim.ts and render.wgsl
 const HOLD_RINGS = 5;    // cells: how far `held` looks for a cell of the layer
 const WALL_BEVEL = 1.5;  // cells: the lit slope of a wall in render.wgsl (`walls`)
 const FOOD_RIM = 2.0;    // cells: the lit rim of food in render.wgsl (`flakeAt`)
+const POLE_RIM = 1.5;    // cells: the lit slope of an electrode in render.wgsl (`studAt`)
+const CATHODE_OVER = 191u; // a byte above it is the cathode, any other byte above 0 the anode (types.ts POLE_BYTE)
+
+// Which of the two layers of the outline buffer a cell of `env` holds. Walls and food: a byte of WALL_BYTE (128) or
+// more, the threshold of isWall() in common.wgsl, for food too. With POLES the cathode and the anode, by the fourth
+// byte as the passes of the simulation read it (diffuse.wgsl `sources`).
+fn layersOf(e: u32) -> vec2<bool> {
+  if (POLES) {
+    let pole = e >> 24u;
+    return vec2<bool>(pole > CATHODE_OVER, pole > 0u && pole <= CATHODE_OVER);
+  }
+  return vec2<bool>((e & 0xffu) >= WALL_BYTE, ((e >> 8u) & 0xffu) >= WALL_BYTE);
+}
 const SHADOW = vec2f(1.08, 1.44); // cells away from the light (top left) that walls cast their shadow
 const SHADOW_SOFT = 1.5;          // cells: radius of the cone that blurs the shadow
 
@@ -137,25 +114,24 @@ fn gridIndex(q: vec2i, d: vec2i) -> i32 {
   return c.y * size.x + c.x;
 }
 
-// Whether `env` holds a layer (`shift` 0 wall, 8 food) in cell q + d of the grid: a byte of WALL_BYTE (128) or
-// more, the threshold of isWall() in common.wgsl, for food too. The dish does not count here: what other
+// Whether `env` holds a layer (0 or 1, layersOf()) in cell q + d of the grid. The dish does not count here: what other
 // boundaries left outside it stays `env`, and holding the bytes to less than it would remove outlines for good.
-fn holds(q: vec2i, d: vec2i, shift: u32) -> bool {
+fn holds(q: vec2i, d: vec2i, layer: u32) -> bool {
   let i = gridIndex(q, d);
-  return i >= 0 && ((env[i] >> shift) & 0xffu) >= WALL_BYTE;
+  return i >= 0 && layersOf(env[i])[layer];
 }
 
 // The largest byte that cell q may hold for a layer that `env` does not hold at q. The renderer's spline
 // rebuilds an outline only within the 3 × 3 cells around a cell of the layer, so with the nearest such cell
 // k cells away (Chebyshev), the outline lies at least k − 1.5 cells away. A subtraction keeps the distance to
 // the old outline (painting and erasing one stroke leaves a crease along it), and this removes what it left.
-fn holdByte(q: vec2i, shift: u32) -> u32 {
+fn holdByte(q: vec2i, layer: u32) -> u32 {
   for (var k = 1; k <= HOLD_RINGS; k++) {
     for (var t = -k; t <= k; t++) {
-      if (holds(q, vec2i(t, -k), shift) || holds(q, vec2i(t, k), shift)) { return distanceByte(1.5 - f32(k)); }
+      if (holds(q, vec2i(t, -k), layer) || holds(q, vec2i(t, k), layer)) { return distanceByte(1.5 - f32(k)); }
     }
     for (var t = 1 - k; t < k; t++) {
-      if (holds(q, vec2i(-k, t), shift) || holds(q, vec2i(k, t), shift)) { return distanceByte(1.5 - f32(k)); }
+      if (holds(q, vec2i(-k, t), layer) || holds(q, vec2i(k, t), layer)) { return distanceByte(1.5 - f32(k)); }
     }
   }
   return 0u;
@@ -169,10 +145,10 @@ fn heldBy(b: u32, here: bool, hold: u32) -> u32 {
 }
 
 // A byte after `refresh`, held to what `env` holds of its layer at and around q. A byte of 0 needs no search.
-fn held(b: u32, q: vec2i, shift: u32) -> u32 {
-  let here = holds(q, vec2i(0), shift);
+fn held(b: u32, q: vec2i, layer: u32) -> u32 {
+  let here = holds(q, vec2i(0), layer);
   if (here || b == 0u) { return heldBy(b, here, 0u); }
-  return heldBy(b, false, holdByte(q, shift));
+  return heldBy(b, false, holdByte(q, layer));
 }
 
 // No cell of the layer within 3 rings: more than any squared distance (dx² + dy²) there, which is at most 18.
@@ -189,7 +165,7 @@ fn floorByte(n: u32) -> u32 {
   return distanceByte(-sqrt(f32(n)));
 }
 
-// The squared distances (wall, food) from cell q to the nearest cell of each layer that `env` holds in the arena (the
+// The squared distances from cell q to the nearest cell of each of the two layers that `env` holds in the arena (the
 // dish counts), up to 3 rings away: the nearest cell lies in the first ring that has one (k √2 < k + 1 for k ≤ 2), and
 // from 4 cells on floorByte() is 0.
 fn nearestCells(q: vec2i) -> vec2u {
@@ -203,10 +179,10 @@ fn nearestCells(q: vec2i) -> vec2u {
       for (var dx = -k; dx <= k; dx += stride) {
         let i = gridIndex(q, vec2i(dx, dy));
         if (i < 0 || (P.cfg.z == 2u && distance(vec2f(q + vec2i(dx, dy)) + 0.5, middle) > dishRadius())) { continue; }
-        let e = env[i];
+        let l = layersOf(env[i]);
         let r = u32(dx * dx + dy * dy);
-        if ((e & 0xffu) >= WALL_BYTE) { m.x = min(m.x, r); }
-        if (((e >> 8u) & 0xffu) >= WALL_BYTE) { m.y = min(m.y, r); }
+        if (l.x) { m.x = min(m.x, r); }
+        if (l.y) { m.y = min(m.y, r); }
       }
     }
     n = select(n, m, n == vec2u(NONE));
@@ -262,6 +238,7 @@ fn ownHeld(q: vec2i) -> bool {
 
 // True in the pipeline for the eraser and walls, false for food and light, and CORE for erasers wide enough to have a
 // workgroup in their core (eraserCore(); sim.ts outlineVariant()): a condition fixed for the pipeline costs nothing.
+// With POLES every stroke subtracts from a layer, so every pipeline loads the tile.
 override TILED: bool = true;
 override CORE: bool = true;
 
@@ -324,7 +301,7 @@ fn shadowByte(q: vec2i, local: vec2i) -> u32 {
 const TILE_SIDE = 26; // 16 + 2 · HOLD_RINGS
 var<workgroup> tileEnv: array<u32, 676>; // TILE_SIDE²; 0 outside a closed grid, wrapped on the periodic one
 // Per cell of the 16 columns and the TILE_SIDE rows: the distance along its row to the nearest cell of each layer,
-// at most HOLD_RINGS + 1 (none within reach). Wall in bits 0–7, food in bits 8–15.
+// at most HOLD_RINGS + 1 (none within reach). The first layer in bits 0–7, the second in bits 8–15.
 var<workgroup> rowNear: array<u32, 416>; // 16 · TILE_SIDE
 
 // `env` of cell p of the box frame: wrapped on the periodic grid, 0 outside a closed grid (gridIndex()).
@@ -380,10 +357,10 @@ fn outline(
       let row = i32(e / 16u) * TILE_SIDE + i32(e % 16u) + HOLD_RINGS;
       var near = vec2u(u32(HOLD_RINGS) + 1u);
       for (var i = -HOLD_RINGS; i <= HOLD_RINGS; i++) {
-        let v = tileEnv[row + i];
+        let l = layersOf(tileEnv[row + i]);
         let a = u32(abs(i));
-        if ((v & 0xffu) >= WALL_BYTE) { near.x = min(near.x, a); }
-        if (((v >> 8u) & 0xffu) >= WALL_BYTE) { near.y = min(near.y, a); }
+        if (l.x) { near.x = min(near.x, a); }
+        if (l.y) { near.y = min(near.y, a); }
       }
       rowNear[e] = near.x | (near.y << 8u);
     }
@@ -419,7 +396,7 @@ fn outline(
     e = tileEnv[local.y * TILE_SIDE + local.x];
   } else {
     e = env[c];
-    here = vec2<bool>((e & 0xffu) >= WALL_BYTE, ((e >> 8u) & 0xffu) >= WALL_BYTE);
+    here = layersOf(e);
   }
   let d = strokeDistance(q, B.radius + SHAPE_RANGE);
   // A union adds the stroke rounded off near its middle line; a subtraction needs only its outline.
@@ -429,6 +406,39 @@ fn outline(
   var food = (old >> 8u) & 0xffu;
   var light = (old >> 16u) & 0xffu;
   var shadow = old >> 24u;
+  if (POLES) {
+    // The outlines of the electrodes: `wall` is the cathode here and `food` the anode. A pole unites with its own
+    // layer as a wall does with the walls, rounded for the slope that the renderer lights, and it subtracts from the
+    // other pole. An erase and a wall subtract from both. Food and light leave the poles, and their strokes run no
+    // pass here. The other two bytes stay 0.
+    //
+    // A pole and a wall fill the cells that they take, and the renderer draws them from the rounded byte of their
+    // union. So their subtraction takes the complement of that byte, not of the plain distance: the pole below then
+    // ends exactly where the stroke begins, and no ground shows between the two. With the plain distance a stroke
+    // thinner than 2 cells was drawn up to 0.14 cells narrower than the gap that it cut (ADR 0058). An erase fills
+    // nothing: it takes the plain distance, which gives the straighter edge.
+    let own = distanceByte(B.radius - rounded(d, B.radius, POLE_RIM));
+    switch B.kind {
+      case 5u: {
+        wall = united(wall, own, here.x, q);
+        food = heldBy(min(food, 255u - ownByte(own, q, 255u - food)), here.y, hold.y);
+      }
+      case 4u: {
+        food = united(food, own, here.y, q);
+        wall = heldBy(min(wall, 255u - ownByte(own, q, 255u - wall)), here.x, hold.x);
+      }
+      case 0u, 1u: {
+        // The union of a wall lies in `shape`, rounded for its bevel (below).
+        let byte = select(s, distanceByte(B.radius - rounded(d, B.radius, WALL_BEVEL)), B.kind == 1u);
+        let t = ownByte(byte, q, 255u - max(wall, food));
+        wall = heldBy(min(wall, 255u - t), here.x, hold.x);
+        food = heldBy(min(food, 255u - t), here.y, hold.y);
+      }
+      default: {}
+    }
+    shape[c] = wall | (food << 8u);
+    return;
+  }
   // A subtraction takes the complement of its byte, held to the cells it paints as a union's (ownByte()): where it
   // erases no cell near q it carves no outline there. It holds every byte of the box: the box holds every cell within
   // HOLD_RINGS of a cell it painted, so every byte whose hold it can change, and the bytes beyond it keep theirs.
@@ -464,6 +474,11 @@ fn refresh(@builtin(global_invocation_id) gid: vec3u) {
   // floorByte() is at most 96 (one cell) and at most the hold, so the maximum keeps the bytes held.
   let n = nearestCells(q);
   let wall = max(held(old & 0xffu, q, 0u), floorByte(n.x));
-  let food = max(held((old >> 8u) & 0xffu, q, 8u), floorByte(n.y));
+  let food = max(held((old >> 8u) & 0xffu, q, 1u), floorByte(n.y));
+  // The outlines of the electrodes are the two distances alone.
+  if (POLES) {
+    shape[c] = wall | (food << 8u);
+    return;
+  }
   shape[c] = wall | (food << 8u) | (env[c] & 0xff0000u) | (shadowByte(q, vec2i(-1)) << 24u);
 }

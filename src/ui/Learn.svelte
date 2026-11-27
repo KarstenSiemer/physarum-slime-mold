@@ -2,6 +2,7 @@
   import {
     collisionsHelp,
     coveredFoodHelp,
+    flowEdgesHelp,
     flowHelp,
     globalSpec,
     repellentSpec,
@@ -10,7 +11,10 @@
     modelHelp,
     stepOrderHelp,
     scentViewHelp,
+    frontViewHelp,
+    slimeViewHelp,
     strainSpec,
+    territoryHelp,
     tubeViewHelp,
   } from '../model/params';
   import { GROUPS, JONES_PDF, PRESETS } from '../model/presets';
@@ -42,10 +46,13 @@
     'shrinkMax',
     'capacity',
   ]);
+  // The values below the switch Flow in the tubes, listed after it.
+  const FLOW_KEYS = new Set<string>(['flowStrength', 'flowBase', 'drift', 'frontFlux']);
   const specs: { label: string; help: string; ref?: string }[] = [
     ...Object.values(strainSpec),
+    // The values of the flow and of the rules of the growth front come after their switches, as in the panel.
     ...Object.entries(globalSpec)
-      .filter(([k]) => !GROWTH_KEYS.has(k) && k !== 'flowStrength')
+      .filter(([k]) => !GROWTH_KEYS.has(k) && !FLOW_KEYS.has(k))
       .map(([, v]) => v),
     // Light strength under the name that the Jones model gives it (ADR 0044).
     repellentSpec,
@@ -58,11 +65,19 @@
     ...Object.entries(globalSpec)
       .filter(([k]) => GROWTH_KEYS.has(k))
       .map(([, v]) => v),
-    // The switch Flow in the tubes comes before its value, as in the panel.
+    // The switch Flow in the tubes comes before its values, and the rules of the growth front after them, as in the
+    // panel (ADR 0087).
     flowHelp,
     globalSpec.flowStrength,
+    flowEdgesHelp,
+    globalSpec.flowBase,
+    territoryHelp,
+    globalSpec.drift,
+    globalSpec.frontFlux,
     // The view switches last: they change only the picture.
     tubeViewHelp,
+    slimeViewHelp,
+    frontViewHelp,
     scentViewHelp,
   ];
 
@@ -255,6 +270,12 @@
         much farther, but the line stays about 12 to 14 cells from a food in both models. The wider scent does not steer
         from farther away. The view changes only the picture, not the simulation.
       </p>
+      <p>
+        The wet film on the ground is slime. A slime mold leaves slime where it was, and the extended model marks that
+        ground. The film is thick where a tube stayed for a long time, so you still see where a tube ran after it is
+        gone. The film gets thinner as the slime gets older, and it is gone after the Slime life time. No rule of the
+        model reads the slime yet. The switch Show slime, in the panel under Slime, hides the film.
+      </p>
     {:else if app.learnTab === 'Controls'}
       <dl>
         {#each specs as spec (spec.label)}
@@ -265,29 +286,33 @@
         {/each}
       </dl>
       <p>
-        Keys: Space play/pause, . step, R reset, 1–8 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
+        Keys: Space play/pause, . step, R reset, 1–9 tools, [ and ] brush size, F fit view, S scent, H hide panels, L
         this dialog.
       </p>
       <p>
-        Food, Light, Wall, Erase and Electrode paint where you drag. For a straight line, hold Shift, click the start
-        and then click the end. A preview shows the line as wide as the brush until the second click. While you hold
-        Shift, each further click adds a line from the last end, so you can draw a wall with corners. Press Escape or
-        let go of Shift to stop. A touch screen without a keyboard has no straight lines.
+        Food, Light, Wall, Erase, Electrode and Slime paint where you drag. The Slime tool is there in the extended
+        model while Slime life time is above 0. For a straight line, hold Shift, click the start and then click the end.
+        A preview shows the line as wide as the brush until the second click. While you hold Shift, each further click
+        adds a line from the last end, so you can draw a wall with corners. Press Escape or let go of Shift to stop. A
+        touch screen without a keyboard has no straight lines.
       </p>
       <p>
-        The page address is a link to what you see: the settings, the scene, and the food, light, walls and electrodes
-        you painted. Copy it to share the scene or to come back to it. The agents and their trails start again when the
-        link opens. If the drawing is too large for a link, a notice says so. The link then opens the scene as it loads,
-        without the drawing. If this app cannot read the drawing in a link, a notice says so, and only the settings
-        load.
+        The page address is a link to what you see: the settings, the scene, and the food, light, walls, electrodes and
+        slime you painted. Copy it to share the scene or to come back to it. The agents and their trails start again
+        when the link opens. If the drawing is too large for a link, a notice says so. The link then opens the scene as
+        it loads, without the drawing. If this app cannot read the drawing in a link, a notice says so, and only the
+        settings load.
       </p>
     {:else if app.learnTab === 'Scenes'}
       <p>
-        Each scene loads its settings with its food, light and walls. Scenes marked Jones 2010 use the settings of a
-        figure in his paper, on the grid of that figure. Fogleman 2020 scenes are his saved settings, and the others
-        were made for this app. These scenes use a grid shaped like your screen. The three Tokyo scenes, Food ring and
-        Rival networks have a square grid on every screen, so north stays up on the map of Tokyo. Snail maze and Corn
-        maze have a grid of their own too, so their corridors are as wide on every screen.
+        Each scene loads its settings with its food, light and walls. The scenes under Start here and Experiments run
+        this app’s rules for the organism: one agent per cell, growth and shrinkage, the flow in the tubes and the
+        slime. Scenes marked Jones 2010 use the settings of a figure in his paper, on the grid of that figure. Paper
+        experiments are the experiments of the papers on Jones’ model, each with the model and the values of its paper.
+        Under Agents share cells the rule of one agent per cell is off: Fogleman 2020 scenes are his saved settings, and
+        the two weaves were made for this app. Most scenes have a grid of their own on every screen, so a dish stays
+        round, a corridor keeps its width and north stays up on the map of Tokyo. Maze, Foraging maze and the scenes
+        where agents share cells use a grid shaped like your screen.
       </p>
       {#each GROUPS as g (g.id)}
         <h3>{g.label}</h3>
@@ -358,6 +383,12 @@
         The scene Voronoi diagram: J. Jones and A. Adamatzky, “Slime mould inspired generalised Voronoi diagrams with
         repulsive fields”, 2015,
         <a href="https://arxiv.org/abs/1503.06973" rel="noreferrer">arXiv:1503.06973</a>.
+      </p>
+      <p>
+        The three scenes of the Y-maze and Slime everywhere: C. R. Reid, T. Latty, A. Dussutour and M. Beekman, “Slime
+        mold uses an externalized spatial ‘memory’ to navigate in complex environments”, <em>PNAS</em> 109(43):
+        17490–17494, 2012,
+        <a href="https://doi.org/10.1073/pnas.1215037109" rel="noreferrer">doi:10.1073/pnas.1215037109</a>.
       </p>
       <p>
         GPU approach and visual inspiration: Sage Jenson,

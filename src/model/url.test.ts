@@ -23,6 +23,7 @@ describe('URL settings', () => {
     Object.assign(s, { model: 'extended', coveredFood: true, coveredFoodFactor: 0.01, trailSaturation: 40 });
     s.showScent = true; // a setting of the look, as the style: the link shows what the sender sees
     s.showTubes = false; // so is the picture of the tubes (ADR 0034)
+    s.showSlime = false; // and the film of the slime (ADR 0055)
     s.gelColor = 'strong'; // and the colour of the gel (ADR 0009)
     const encoded = await encodeSettings(s);
     expect(encoded).toMatch(/^[\w-]+$/);
@@ -34,9 +35,14 @@ describe('URL settings', () => {
   it('holds the mean window only when it is not 3 × 3, and round-trips it', async () => {
     const network = presetById('network')?.settings() ?? defaultSettings();
     for (const s of [defaultSettings(), network]) {
-      const { meanWindow: _, electrodeStrength: _e, ...held } = s;
-      // Light stops growth is in a link of the extended model, and in none of the Jones model (ADR 0050).
-      const { lightGrowth: _l, ...none } = held;
+      // The rules of stage 4 are in a link only while they are on (ADR 0068), and so are their drift (ADR 0070), the
+      // flux of their front (ADR 0086), their weight on slime and their reach to fresh ground (ADR 0088); the
+      // neighbours and the base conductance of the flow only while it is on (ADR 0086).
+      const { meanWindow: _, electrodeStrength: _e, territory: _t, drift: _d, ...rest } = s;
+      const { frontFlux: _k, flowEdges: _n, flowBase: _b, slimeWeight: _w, freshReach: _r, ...held } = rest;
+      // Light stops growth is in a link of the extended model, and in none of the Jones model (ADR 0050). So is Slime
+      // life time (ADR 0055).
+      const { lightGrowth: _l, slimeLife: _s, ...none } = held;
       const before = s.model === 'jones' ? none : held;
       // A link made now also holds the mark `rules` of ADR 0044.
       expect(await encodeSettings(s)).toBe(await hashPart(JSON.stringify({ ...before, rules: LINK_RULES })));
@@ -76,9 +82,10 @@ describe('URL settings', () => {
     }
     const { lightGrowth: _, ...old } = s;
     expect(sanitize(old).lightGrowth).toBe(0);
-    // A link with 0 has the bytes of a link made before the rule.
-    const { meanWindow: _m, electrodeStrength: _e, ...made } = old;
-    expect(await encodeSettings({ ...s, lightGrowth: 0 })).toBe(
+    // A link with 0, and with a Slime life time of 0 (ADR 0055), has the bytes of a link made before the rule.
+    const { meanWindow: _m, electrodeStrength: _e, slimeLife: _s, territory: _t, drift: _d, ...rest } = old;
+    const { frontFlux: _k, flowEdges: _n, flowBase: _b, slimeWeight: _w, freshReach: _r, ...made } = rest;
+    expect(await encodeSettings({ ...s, lightGrowth: 0, slimeLife: 0 })).toBe(
       await hashPart(JSON.stringify({ ...made, rules: LINK_RULES })),
     );
     expect(sanitize({ lightGrowth: 7 }).lightGrowth).toBe(1);
@@ -87,6 +94,42 @@ describe('URL settings', () => {
     expect(network.model).toBe('jones');
     expect(sanitize({ ...network, lightGrowth: 0.75 }).lightGrowth).toBe(1);
     expect(await encodeSettings({ ...network, lightGrowth: 0.75 })).toBe(await encodeSettings(network));
+  });
+
+  // ADR 0055, decision 10: a link of the extended model holds Slime life time when it is not 0, so a link made now
+  // holds the default of 144 hours. A link without it, as every link made before the slime field, opens with 0: it has
+  // no slime, and its starved ground keeps the time of ADR 0054, so it runs as it was made. The Jones model has no
+  // slime: its link holds none, and it opens with the default.
+  it('holds Slime life time in a link of the extended model, and opens a link without it with 0', async () => {
+    const s = defaultSettings();
+    expect(s.slimeLife).toBe(144);
+    for (const slimeLife of [144, 18, 240, 1, 0]) {
+      const slimy = { ...s, slimeLife };
+      expect(await decodeSettings(await encodeSettings(slimy))).toEqual(slimy);
+    }
+    expect(await encodeSettings({ ...s, slimeLife: 18 })).not.toBe(await encodeSettings(s));
+    const { slimeLife: _, ...old } = s;
+    expect(sanitize(old).slimeLife).toBe(0);
+    // A link with 0 has the bytes of a link made before the slime field.
+    const { meanWindow: _m, electrodeStrength: _e, territory: _t, drift: _d, ...rest } = old;
+    const { frontFlux: _k, flowEdges: _n, flowBase: _b, slimeWeight: _w, freshReach: _r, ...made } = rest;
+    expect(await encodeSettings({ ...s, slimeLife: 0 })).toBe(
+      await hashPart(JSON.stringify({ ...made, rules: LINK_RULES })),
+    );
+    // Whole hours from 0 to 240, and 0 for anything that is no number.
+    expect(sanitize({ slimeLife: 700 }).slimeLife).toBe(240);
+    expect(sanitize({ slimeLife: -1 }).slimeLife).toBe(0);
+    expect(sanitize({ slimeLife: 17.6 }).slimeLife).toBe(18);
+    expect(sanitize({ slimeLife: 1e-300 }).slimeLife).toBe(0);
+    for (const junk of ['144', null, true, [144], {}, Number.NaN, Infinity])
+      expect(sanitize({ slimeLife: junk }).slimeLife, JSON.stringify(junk)).toBe(0);
+    const network = presetById('network')?.settings() ?? s;
+    expect(network.model).toBe('jones');
+    expect(sanitize({ ...network, slimeLife: 18 }).slimeLife).toBe(144);
+    expect(await encodeSettings({ ...network, slimeLife: 18 })).toBe(await encodeSettings(network));
+    const { slimeLife: __, ...jonesLink } = network;
+    expect(await decodeSettings(await encodeSettings(network))).toEqual(network);
+    expect(sanitize(jonesLink)).toEqual(network);
   });
 
   // ADR 0025: growth, its values and the capacity travel with the link.
@@ -538,5 +581,77 @@ describe('URL links and the model', () => {
     const strain = { ...defaultStrain(0), decay: 0.0005 };
     const s = { ...network, model: 'extended' as const, scentDecay: 0.0005, strains: [strain] };
     expect(await open(s)).toEqual(s);
+  });
+});
+
+// ADR 0068: a link holds the rules of stage 4 only while they are on, so a link without them has the bytes of a link
+// made before the setting, and a link without it opens with them off.
+describe('the rules of stage 4 in a link (ADR 0068)', () => {
+  it('holds the setting only while it is on, and round-trips it', async () => {
+    const s = { ...defaultSettings(), flow: true, growth: true, collisions: true, density: 0.15 };
+    const on = { ...s, territory: true };
+    expect(await encodeSettings(on)).not.toBe(await encodeSettings(s));
+    expect(await decodeSettings(await encodeSettings(on))).toEqual(on);
+    expect((await decodeSettings(await encodeSettings(s)))?.territory).toBe(false);
+    const { territory: _, ...before } = s;
+    expect(sanitize(before).territory).toBe(false);
+  });
+
+  // ADR 0070: so with the drift of the rules, and a link without it opens with its default.
+  it('holds the drift only while the rules are on, and round-trips it', async () => {
+    const s = { ...defaultSettings(), flow: true, growth: true, collisions: true, density: 0.15, drift: 3 };
+    const on = { ...s, territory: true };
+    expect(await decodeSettings(await encodeSettings(on))).toEqual(on);
+    expect(await encodeSettings(on)).not.toBe(await encodeSettings({ ...on, drift: 1.5 }));
+    // Off: the link holds no drift, and opens with the default.
+    expect(await encodeSettings(s)).toBe(await encodeSettings({ ...s, drift: 1.5 }));
+    expect((await decodeSettings(await encodeSettings(s)))?.drift).toBe(defaultSettings().drift);
+  });
+
+  // ADR 0086: so with the flux to the front, and a link without it opens with 1.
+  it('holds the flux to the front only while the rules are on, and round-trips it', async () => {
+    const s = { ...defaultSettings(), flow: true, growth: true, collisions: true, density: 0.15, frontFlux: 2 };
+    const on = { ...s, territory: true };
+    expect(await decodeSettings(await encodeSettings(on))).toEqual(on);
+    expect(await encodeSettings(on)).not.toBe(await encodeSettings({ ...on, frontFlux: 1 }));
+    // Off: the link holds no flux to the front, and opens with the default.
+    expect(await encodeSettings(s)).toBe(await encodeSettings({ ...s, frontFlux: 1 }));
+    expect((await decodeSettings(await encodeSettings(s)))?.frontFlux).toBe(1);
+  });
+
+  // ADR 0088: so with the weight on slime and the reach to fresh ground, and a link without them opens with 0.025 and
+  // 6, the constants of before: a link made before the settings runs as it was made.
+  it('holds the weight on slime and the reach to fresh ground only while the rules are on, and round-trips them', async () => {
+    const s = { ...defaultSettings(), flow: true, growth: true, collisions: true, density: 0.15 };
+    const on = { ...s, territory: true, slimeWeight: 0.3, freshReach: 3 };
+    expect(await decodeSettings(await encodeSettings(on))).toEqual(on);
+    expect(await encodeSettings(on)).not.toBe(await encodeSettings({ ...on, slimeWeight: 0.025 }));
+    expect(await encodeSettings(on)).not.toBe(await encodeSettings({ ...on, freshReach: 6 }));
+    // Off: the link holds neither, and opens with the defaults.
+    const off = { ...on, territory: false };
+    expect(await encodeSettings(off)).toBe(await encodeSettings({ ...off, slimeWeight: 0.025, freshReach: 6 }));
+    const back = await decodeSettings(await encodeSettings(off));
+    expect([back?.slimeWeight, back?.freshReach]).toEqual([0.025, 6]);
+    const { slimeWeight: _w, freshReach: _r, ...old } = on;
+    expect([sanitize(old).slimeWeight, sanitize(old).freshReach]).toEqual([0.025, 6]);
+  });
+});
+
+// ADR 0086: a link holds the neighbours and the base conductance of the flow only while the flow is on, so a link
+// without the flow has the bytes of a link made before the settings, and a link without them opens with 4 and 0.02.
+describe('the neighbours and the base conductance of the flow in a link (ADR 0086)', () => {
+  it('holds them only while the flow is on, and round-trips them', async () => {
+    const s: Settings = { ...defaultSettings(), flow: true, flowEdges: 8, flowBase: 0.002 };
+    expect(await decodeSettings(await encodeSettings(s))).toEqual(s);
+    expect(await encodeSettings(s)).not.toBe(await encodeSettings({ ...s, flowEdges: 4 }));
+    expect(await encodeSettings(s)).not.toBe(await encodeSettings({ ...s, flowBase: 0.02 }));
+    // Off: the link holds neither, and opens with the defaults.
+    const off = { ...s, flow: false };
+    expect(await encodeSettings(off)).toBe(await encodeSettings({ ...off, flowEdges: 4, flowBase: 0.02 }));
+    const back = await decodeSettings(await encodeSettings(off));
+    expect([back?.flowEdges, back?.flowBase]).toEqual([4, 0.02]);
+    // A link made before the settings, with the flow on, runs with 4 neighbours and 0.02, as it was made.
+    const { flowEdges: _n, flowBase: _b, ...old } = s;
+    expect([sanitize(old).flowEdges, sanitize(old).flowBase]).toEqual([4, 0.02]);
   });
 });

@@ -14,7 +14,9 @@ How a fact was read:
 - **notes**, after a mark: a research helper of the coordinator read it, the notes of 2026-11-16 hold it, and nobody
   checked it again. No PDF of such a paper lies in `papers/`. Three open copies refused an automatic reader on
   2026-11-16: a bot check at PubMed Central (Reid et al. 2012, Dussutour et al. 2010) and HTTP 403 at the Royal
-  Society (Briard et al. 2020).
+  Society (Briard et al. 2020). On 2026-11-17 the coordinator read Reid et al. 2012 and Briard et al. 2020 in full
+  in the copies of PubMed Central, so their lines have **[V]** alone now. Reid et al. 2013 stays **[A, notes]**: the
+  page of its publisher answered HTTP 403.
 - "cited there": the paper that was read says it of another paper, which nobody of this project read.
 - **[I]** an inference or a conclusion of this project, not a fact of a paper.
 
@@ -69,6 +71,9 @@ the legend again through an automatic reader. Nobody read the body text.
   Almeida 2021, p. 8, cited there [V]).
 - The legend of Fig. 1 of 2000 calls panel a the organism before it finds the path. It does not say in words that the
   plasmodium fills the maze [A].
+- Reid et al. 2012 say it of the maze and of the networks between foods: the plasmodium first explores its whole
+  space, with cytoplasm in all of it at the same time, and then takes the cytoplasm back from the parts without food
+  (Discussion; they cite the papers of Nakagaki of 2000 to 2007) [V].
 - [I] So the experiment has no growth after the food comes. The plasmodium covers every corridor first. What follows
   is a withdrawal: the mass moves to the two foods, the dead ends empty, and tubes stay. The sources do not use the
   words "did not grow"; this is this project's reading of the four lines above.
@@ -162,17 +167,36 @@ of this project read it.
 
 ### The plasmodium avoids its own slime
 
-Reid et al. 2012 [V, notes]:
+Reid et al. 2012 [V]. The coordinator read the full text on 2026-11-17, in the copy of PubMed Central (PMC3491460),
+in the browser of the Claude app. The lines name the part of the paper; the copy prints no page numbers.
 
-- A Y-maze with food at the ends of both arms, one arm coated with slime: 39 of 40 plasmodia chose the blank arm.
-  With slime on both arms they showed no preference (n = 23). So slime is a choice, not a wall.
-- The plasmodium senses the slime upon contact.
-- A U-shaped trap between the plasmodium and a goal: 96 % of 24 plasmodia reached the goal within 120 h on blank agar,
-  and 33 % on agar coated with slime.
-- A coat of slime does not mask the cue of the food. The paper says nothing on how long slime lasts.
-- Not in the docs: the size of the Y-maze and of the trap, the time of a trial, and how a choice was scored. The
-  open copy did not open for the helper. Stage 2 builds a scene after this paper, so someone must read these in a
-  browser first.
+- **The Y-maze** (Results; Materials and Methods, "Avoidance response"; Fig. 2). Each arm is 4 cm long and made of
+  1 % agar. A food of 10 % powdered oat in agar lies at the end of each arm. The base is a block of agar of 1 cm²
+  with 3 cm² of search front on it; these are the numbers of the text. Not stated: the width of the arms, the angle
+  between them, and the time of a trial.
+- **The slime of the Y-maze**: a culture of the same stock migrated for 8 to 12 h across 1 % agar and left its
+  slime there.
+- **The score**: the arm whose food the plasmodium touches first is the chosen arm. A plasmodium that reaches both
+  foods at the same time is a split and is left out. The arm with the slime changed sides between the runs.
+- **The counts**: with slime on one arm, 39 of 40 plasmodia chose the blank arm (P < 0.001). With slime on both arms
+  they showed no preference (n = 23, P = 0.93, one split). With two blank arms they showed no preference for a side
+  (n = 40, P = 0.636). So slime is a choice, not a wall.
+- The paper concludes from this that the plasmodium senses the slime upon contact.
+- **The U-shaped trap** (Results; Materials and Methods, "Externalized spatial memory navigation task"; Fig. 3 and
+  4). The dish is 8.6 cm wide and holds 1 % agar. The trap is a sheet of acetate on the agar: 5.2 cm at its base,
+  with arms of 3.5 cm, in the centre of the dish. The plasmodium does not move over the dry sheet, and the glucose
+  diffuses in the agar below it. The start: 1 mm² of search front. The goal: a well of 0.5 cm with 50 µL of 2 %
+  glucose. A photo every 5 min, for 120 h at most.
+- **The slime of the trap**: a plasmodium of 3 to 4 mm² explored a dish of 30 cm for 48 h; the disc of 8.6 cm was
+  cut from this agar, without any plasmodium on it.
+- **The counts of the trap**: 96 % of 24 plasmodia reached the goal within 120 h on blank agar, and 33 % of 24 on
+  agar with slime. Those that arrived were faster on blank agar (n = 23 and 8). On slime a plasmodium stayed longer
+  inside the trap, spent almost ten times as long on ground that it had explored before, and went a longer way. The
+  mean speed did not differ (P = 0.345).
+- **Without the trap** the slime changed neither the time to the glucose, nor the way, nor the speed (n = 13 and
+  16). So a coat of slime does not mask the cue of the food.
+- The paper gives no life time of the slime. [I] The slime of the trap was up to 48 h old at the start of a run of up
+  to 120 h, and it still masked the plasmodium's own trail. So slime of 2 to 7 days still acts.
 
 L. Tröger, F. Goirand, K. Alim: "Size-dependent self-avoidance enables superdiffusive migration in macroscopic
 unicellulars", PNAS 121: e2312611121 (2024) [V]:
@@ -194,10 +218,28 @@ More findings:
 - Slime is a cue for "no food here". When the plasmodium perceives food, it enters ground with slime (C. R. Reid,
   M. Beekman, T. Latty, A. Dussutour: Behav. Ecol. 24: 812–818 (2013)) [A, notes]. Slime from a large culture made
   very large plasmodia (1 cm²) avoid it for up to 6 days (Tröger et al. 2024, p. 3, cited there from this paper) [V].
-- Ground that a starved clone mate explored is avoided: 16 % chose it. Ground of a well-fed one attracts: 88 % chose
-  it. On food there is no avoidance. Three strains showed no difference between the ground of their own strain and
-  of another (Briard et al. 2020, Phil. Trans. R. Soc. B 375) [V, notes]. The notes give no title and no article
-  number, and no PDF of `papers/` cites the paper.
+- L. Briard, C. Goujarde, C. Bousquet, A. Dussutour: "Stress signalling in acellular slime moulds and its detection
+  by conspecifics", Phil. Trans. R. Soc. B 375: 20190470 (2020) [V]. The coordinator read the full text on
+  2026-11-17, in the copy of PubMed Central (PMC7331006), without the supplement. The next six lines are from it.
+- **What the plasmodia answered was not the slime.** A plasmodium explored a gel for 24 h. Then the gel was rinsed
+  lightly with distilled water, to remove the slime, and cut up for the tests (Sec. 2b). So the cue is a substance
+  that stays in the gel.
+- **Two tests** (Sec. 2b and 2e). Patch: a plasmodium of 13 mm and two patches of 13 mm, 20 mm apart, in a dish of
+  90 mm; the cue reaches the plasmodium by diffusion, and the patch that it reaches first is its choice. Bridge: a
+  plasmodium of 10 mm between two strips of 40 mm × 10 mm that it touches; the strip on which it went farther after
+  24 h is its choice.
+- **Ground of a starved plasmodium is avoided, ground of a well-fed one attracts** (Sec. 3a, Fig. 2). Against blank
+  agar, 88 % (patch, n = 50) and 74 % (bridge, n = 50) chose agar that a well-fed plasmodium had explored. Agar that
+  a plasmodium had explored while it starved for 24 h was chosen by 16 % (patch, n = 62) and by 0.02 % as printed
+  (bridge, n = 50). Between the two, 82 % (n = 50) and 96 % (n = 49) chose the ground of the well-fed one.
+- A plasmodium that stayed joined to its food while it explored plain agar left a repellent too. The repellent was
+  the stronger, the richer its food had been before: 10 %, 5 % or 2.5 % oat (Sec. 3a, Fig. 3).
+- **On food there is no avoidance**: between oat gel that a plasmodium had explored and oat gel that none had, the
+  plasmodia showed no preference (n = 50; Sec. 3b, Fig. 4). Ground of a clone mate that was stressed with caffeine
+  or with light was avoided (Sec. 3b).
+- **Three strains** were equally repelled by ground of stressed clone mates and of stressed plasmodia of another
+  strain (Discussion; the data are in the supplement S9, not read). The paper names Dussutour et al. 2010 and Vogel
+  et al. 2015 for the same finding, and Vogel et al. 2015 for the attractant of a well-fed plasmodium: calcium.
 - **Against it**: on plain agar, and on agar with a little glucose, the growth over ground that the plasmodium had
   left was as frequent as chance gives it. The plasmodia did not avoid that ground (F. Patino-Ramirez, A. Boussard,
   C. Arson, A. Dussutour: "Substrate composition directs slime molds behavior", Sci. Rep. 9: 15444 (2019), p. 4)
@@ -250,7 +292,15 @@ These lines are conclusions [I], not facts of a paper.
 
 - **One slime for all strains.** Briard et al. 2020 found no difference between the ground of the own strain and of
   another, and Tröger et al. 2024 found that large plasmodia avoid the trails of other plasmodia too. The owner
-  decided it on 2026-11-16 (ADR 0052).
+  decided it on 2026-11-16 (ADR 0052). The finding of Briard et al. is about the substance that stays in rinsed
+  ground, not about the slime (next line).
+- **Two things stay on ground that a plasmodium left** (read on 2026-11-17). The first is the slime: the plasmodium
+  avoids it upon contact, as a choice (Reid et al. 2012). The second is a substance in the ground that stays when
+  the slime is rinsed off: a repellent after a starved or stressed plasmodium, and an attractant after a well-fed
+  one (Briard et al. 2020). The experiment of Reid et al. does not take the two apart: their slime came from a
+  culture that migrated over plain agar, and by Briard et al. such a plasmodium leaves the repellent too. In the
+  model the mark of starved ground fits the second thing: ground that a starved tube left is closed for births, and
+  a tube that was not starved leaves ground that the colony takes again at once (ADR 0054).
 - **A bias, not a wall.** With slime on both arms of the Y-maze the plasmodium goes on, and through the U-shaped trap
   a third still arrives over slime. With fresh ground beside it, the choice is nearly strict: 39 of 40. A rule that
   lowers the weight of a slimed cell only while a fresh cell is free gives both. The walk model of Tröger et al. is
@@ -259,16 +309,23 @@ These lines are conclusions [I], not facts of a paper.
 - **Such a bias does not keep the colony out of a dead end** (measured in stage 1, ADR 0053, with the mark of
   starved ground in the place of the slime). Inside a dead end that the colony left, every free cell has slime, so
   the bias never acts there, and the colony comes back as before. What kept the dead ends empty in that measurement
-  was ground that stays closed for births for a fixed time.
-- **Food lifts it.** Reid et al. 2013 (abstract) and Briard et al. 2020 say so. The state of the plasmodium matters as
-  well: ground of a well-fed plasmodium attracts, and the fed plasmodia of Patino-Ramirez et al. 2019 did not avoid
-  left ground at all.
+  was ground that stays closed for births for a fixed time. Since ADR 0054 the mark of starved ground is such ground:
+  a starved tube that vanishes leaves the lowest flow memory, and no child is born there for 3.7 days of model time.
+- **Food lifts it.** Reid et al. 2013 (abstract) and Briard et al. 2020 say so: on oat gel the plasmodia of Briard
+  et al. chose explored and unexplored ground alike. The state of the plasmodium matters as well: ground of a
+  well-fed plasmodium attracts, and the fed plasmodia of Patino-Ramirez et al. 2019 did not avoid left ground at
+  all. Food that lies 4 cm away does not lift it: the Y-maze of Reid et al. 2012 had a food at the end of each arm.
+- **The same speed on slime.** On agar with slime everywhere the plasmodia of Reid et al. 2012 moved as fast as on
+  blank agar. So a rule that slows the growth on slime where no fresh ground is near does not follow the organism.
 - **The reach is short.** The organism senses slime at contact (Reid et al. 2012) or from a short distance (Tröger et
   al. 2024; Masui et al. 2018: 0.1 to 1 mm). A cell of the Tokyo scene is 0.54 mm. So a rule that reads the slime of
   the cell of the child reads at the organism's distance.
-- **No life time to take from a paper**: 3 h to 6 days are reported. In the model today, starved ground is fresh
-  again after up to 18 h, and it is open for births again much sooner: from the lowest memory after 11 h, and half of
-  the closed ground of a dead end within about 7,000 steps, 4 h (`docs/model.md`, 8.4 and 8.6; ADR 0053).
+- **No life time to take from a paper**: 3 h to 6 days are reported, and the slime of the trap of Reid et al. 2012
+  still acted at an age of 2 to 7 days. In the model, starved ground is fresh again
+  after 6 days, the longest of these times, and it is open for births again after 3.7 days (`docs/model.md`, 8.4 and
+  8.6; ADR 0054). Before ADR 0054 the times were 18 h and 11 h at most, and half of the closed ground of a dead end
+  was open again within about 7,000 steps, 4 h (ADR 0053). A mark that fades lets the colony come back when it has
+  faded: measured once, 160,182 steps after the ground closed (ADR 0054).
 - **No answer for the dead ends.** No paper says whether the organism grows back into a dead end. The maze of 2000
   had no growth after the food came, so the growth of the Snail maze and the Corn maze has no experiment to follow.
 
@@ -532,8 +589,9 @@ These lines are conclusions [I], not facts of a paper.
 
 ## For the stages of the plan
 
-**Stage 2 (the slime field).** Read "Slime" above. The numbers of Reid et al. 2012 are in the docs only as far as
-the notes had them; the sizes of the Y-maze and of the trap are missing.
+**Stage 2 (the slime field).** Read "Slime" above. Since 2026-11-17 it has the sizes of the Y-maze and of the trap
+of Reid et al. 2012 and how a choice was scored. The width of the arms of the Y-maze and the time of a trial are
+not in the paper.
 
 **Stage 3 (the picture of the front).** The zones and their sources are in "The front": the sheet, channels and
 tubes (the review, Sec. 2.2, 4.1 and 5.1); the 50 min of the main vein (the thesis of Schenz, Sec. 3.1.3, p. 30); the
@@ -561,10 +619,12 @@ Read by the coordinator on 2026-11-16:
   the cell of the child (ADR 0050). **Measured in stage 1** (ADR 0053): this was a third of the births in the dead
   ends of the Snail maze. Since ADR 0053 no child is born onto a starved cell, and the test of the cell of the parent
   stays.
-- **That was not the cause of the growth back into dead ends** (ADR 0053). The cause is the mark of starved ground: a
-  cell is closed for births while D < 0.01, D falls only while the cell holds a tube, and a starved tube is gone soon.
-  So the ground of a dead end opens again after some thousand steps, and the colony comes back as a wave. `TODO.md`
-  has what follows for stages 2 to 4.
+- **That was not the cause of the growth back into dead ends** (ADR 0053). The cause was the mark of starved ground:
+  a cell is closed for births while D < 0.01, D fell only while the cell held a tube, and a starved tube is gone soon.
+  So the ground of a dead end opened again after some thousand steps, and the colony came back as a wave. ADR 0054
+  changed the mark on 2026-11-17: a starved tube that vanishes leaves its ground at the lowest flow memory, and the
+  mark lasts 6 days. With it the dead ends of the Snail maze stay empty until the mark has faded. `TODO.md` has what
+  follows for stages 2 to 4.
 - Flux exists only between food sites with a role (`docs/model.md`, 8.4 and 8.5). A tube that leads only to a growing
   front carries no flux, so no trunk can form toward a front. Not measured.
 

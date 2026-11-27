@@ -2,8 +2,16 @@
 // whose painting mirrors the shaders (paint-reference.ts; sim.gpu.test.ts compares it with both GPU backends).
 import { describe, expect, it, vi } from 'vitest';
 import { drawingOf } from '../model/link';
-import { defaultSettings, defaultStrain, type Boundary, type Settings } from '../model/params';
-import { presetById, shapesAt, type Preset } from '../model/presets';
+import {
+  defaultSettings,
+  defaultStrain,
+  FOOD_START,
+  strainLike,
+  toJones,
+  type Boundary,
+  type Settings,
+} from '../model/params';
+import { presetById, shapesAt, type EnvShape, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
@@ -11,9 +19,12 @@ import { NO_CELL } from './sites';
 import { Engine } from './engine';
 import { fromFrame, fromShape, fromStroke, strokeOn, type EnvEdit } from './environment';
 import { OutOfMemoryError } from './gpu';
-import { BYTES_PER_AGENT, BYTES_PER_AGENT_GL, memoryBudget } from './sizing';
+import { BYTES_PER_AGENT, BYTES_PER_AGENT_GL, memoryBudget, SLIME_BYTES_PER_CELL as SLIME } from './sizing';
 import { compact, Placement, sweep } from './sweep';
 import { paintReference } from './paint-reference';
+import { stampOf } from './slime';
+import { slimePaint } from './slime-reference';
+import { TERRITORY } from './territory';
 import type { Backend, Stroke } from './types';
 
 // 16:10, like a laptop window: a 512 grid has 512 × 320 cells.
@@ -220,9 +231,10 @@ describe('food, light and walls on a new simulation', () => {
 
   // ADR 0031: every strain has a flow of its own, so a second strain doubles the bytes of the flow.
   it('count the bytes of the flow of every strain, and rebuild when a new strain lowers the grid', async () => {
-    // 1320 B per cell and 80 for the flow of one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
+    // 1305 B per cell, 15 for the slime field and its picture (ADR 0055, ADR 0057, ADR 0060) and 80 for the flow of
+    // one strain fit 768 × 480; with 160 for two strains, only 512 × 320 fits.
     const backend = new CpuBackend();
-    backend.bytesPerCell = 1320;
+    backend.bytesPerCell = 1305;
     const one = { ...maze.settings(), resolution: 768 };
     expect(one.flow).toBe(true);
     const { engine, sim } = await engineWith(one, mazeEnv, canvas(), backend);
@@ -886,6 +898,153 @@ describe('the colonies of the start layout Food', () => {
   });
 });
 
+// ADR 0066: a start spot of a scene takes the place of the food of a strain, as Reid et al. 2012 set a plasmodium on
+// agar without food. It is an edit of the list that paints nothing: the sweep keeps it, Clear removes it, and a link
+// of the scene holds it by the bit of its shape.
+// ADR 0068 (ADR 0067, decision 4): while the rules of stage 4 run, every strain gets its start territory, the disc of
+// the start layout Food and a rim of 3 cells, before the step that places its colony.
+describe('the start territory of the rules of stage 4', () => {
+  const yMaze = presetById('y-maze');
+  if (!yMaze?.env) throw new Error('no Y-maze');
+  const yEnv = yMaze.env;
+  const [first] = yMaze.settings().strains;
+  if (!first) throw new Error('no strain');
+  // The scene runs the rules (ADR 0088): the cases here turn them on and off themselves.
+  const two = { ...yMaze.settings(), territory: false, strains: [first, strainLike(first, 1)] };
+  const radius = Math.sqrt((2 * FOOD_START) / Math.PI) + TERRITORY.rim;
+  /** The discs of the start territory, and the start of every colony with the step of its tool. */
+  const startsOf = (sim: CpuSim) => ({
+    discs: sim.territories,
+    colonies: sim.tools.map((t, step) => ({ strain: t.strain, x: t.x, y: t.y, radius, step })),
+  });
+
+  it('is the disc of the start of each strain with a rim of 3 cells, before the step of its colony', async () => {
+    const { sim } = await engineWith({ ...two, territory: true }, yEnv);
+    const { discs, colonies } = startsOf(sim());
+    expect(colonies).toHaveLength(2);
+    expect(discs).toEqual(colonies);
+  });
+
+  it('is not written while the rules do not run', async () => {
+    for (const patch of [{ territory: false }, { territory: true, flow: false }, { territory: true, growth: false }]) {
+      const { sim } = await engineWith({ ...two, ...patch }, yEnv);
+      expect(sim().tools, JSON.stringify(patch)).toHaveLength(2);
+      expect(sim().territories, JSON.stringify(patch)).toEqual([]);
+    }
+  });
+
+  it('restarts the run when the rules start or stop, also by the flow', async () => {
+    const { engine, sim } = await engineWith(two, yEnv);
+    const restarts = engine.restarts;
+    await engine.apply({ ...engine.settings, territory: true });
+    expect(engine.restarts).toBe(restarts + 1);
+    expect(sim().territories).toHaveLength(2);
+    // The setting stays on, but without the flow the rules stop: a new run without a start territory.
+    await engine.apply({ ...engine.settings, flow: false });
+    expect(engine.restarts).toBe(restarts + 2);
+    expect(sim().territories).toHaveLength(2);
+    // With the flow again they start again, with their start territory.
+    await engine.apply({ ...engine.settings, flow: true });
+    expect(engine.restarts).toBe(restarts + 3);
+    expect(sim().territories).toHaveLength(4);
+    // A change that the rules do not need restarts nothing.
+    await engine.apply({ ...engine.settings, flowStrength: 4 });
+    expect(engine.restarts).toBe(restarts + 3);
+  });
+});
+
+describe('the start spots of a scene', () => {
+  const yMaze = presetById('y-maze');
+  if (!yMaze?.env) throw new Error('no Y-maze');
+  const yEnv = yMaze.env;
+  const [first] = yMaze.settings().strains;
+  if (!first) throw new Error('no strain');
+  /** Where strokeOn() puts shape `i` of the Y-maze on its lattice. */
+  const cellOf = (i: number) => {
+    const shape = yEnv[i];
+    return shape && strokeOn(fromShape(shape, 'box'), 129, 90)?.from;
+  };
+  const toolsOf = (engine: Engine) => (engine.sim as CpuSim).tools.map((t) => [t.strain, t.x, t.y]);
+
+  it('start strain A on the start spot, and a strain without one on its own food', async () => {
+    expect(yEnv.map((e) => e.kind).filter((k) => k !== 'wall' && k !== 'slime')).toEqual(['start', 'food', 'food']);
+    const settings = { ...yMaze.settings(), strains: [first, strainLike(first, 1)] };
+    const engine = await Engine.create(canvas(), settings, undefined, new CpuBackend());
+    await engine.load(settings, yEnv);
+    expect([engine.sim.width, engine.sim.height]).toEqual([129, 90]);
+    // Strain A on the middle of the base (yMaze().start), strain B on the second food stroke: the food of the right
+    // arm, as the start layout Food gives it.
+    const [start, right] = [cellOf(0), cellOf(2)];
+    expect(start?.[0]).toBeCloseTo(64.5, 9);
+    expect(start?.[1]).toBeCloseTo(74.5, 9);
+    expect(toolsOf(engine)).toEqual([
+      [0, start?.[0], start?.[1]],
+      [1, right?.[0], right?.[1]],
+    ]);
+    // Without the start layout Food, no colony: the inoculate tool runs in no step.
+    const before = toolsOf(engine).length;
+    await engine.apply({ ...engine.settings, layout: 'mixed' });
+    expect(toolsOf(engine)).toHaveLength(before);
+  });
+
+  it('paint nothing: the environment, the slime field and the paint calls are those of the list without it', async () => {
+    const settings = yMaze.settings();
+    const [withStart, without] = [
+      await engineWith(settings, yEnv),
+      await engineWith(
+        settings,
+        yEnv.filter((e) => e.kind !== 'start'),
+      ),
+    ];
+    expect(differing(withStart.sim().env, without.sim().env)).toBe(0);
+    const [a, b] = [await withStart.sim().readSlime(), await without.sim().readSlime()];
+    expect(a.filter((v) => v !== 0).length).toBeGreaterThan(1000); // the slime of the left arm
+    expect(Buffer.compare(Buffer.from(a.buffer), Buffer.from(b.buffer))).toBe(0);
+    expect(withStart.sim().calls).toEqual(without.sim().calls);
+    expect(withStart.sim().revision).toBe(without.sim().revision);
+    // The list holds it, so the drawing of the scene matches the scene.
+    expect(edits(withStart.engine)).toHaveLength(yEnv.length);
+    expect(withStart.engine.matches(yEnv, 'box')).toBe(true);
+  });
+
+  it('stay under an erase, go with Clear, and come back with a link of the scene', async () => {
+    const settings = yMaze.settings();
+    const { engine } = await engineWith(settings, yEnv);
+    const start = cellOf(0) ?? [0, 0];
+    // An erase over the base clears no edit that paints: the sweep deletes the erase and keeps the start spot.
+    engine.paint({ kind: 'erase', from: start, to: start, radius: 9 });
+    engine.frame(0, 0);
+    expect(edits(engine)).toHaveLength(yEnv.length);
+    expect(edits(engine)[0]?.kind).toBe('start');
+    engine.reset();
+    expect(toolsOf(engine).at(-1)).toEqual([0, start[0], start[1]]);
+    // The link of the scene names every shape, the start spot too, and the colony of the receiver starts there.
+    const { hash, dropped } = await encodeLink(
+      engine.settings,
+      drawingOf(engine.envList(), 'y-maze', yEnv, 'box', [0]),
+    );
+    expect(dropped).toBe(false);
+    const link = await decodeLink(hash);
+    const d = link?.drawing;
+    if (!link || !d) throw new Error('no drawing in the link');
+    expect(d.shapes.every(Boolean)).toBe(true);
+    const receiver = await Engine.create(canvas(), link.settings, undefined, new CpuBackend());
+    await receiver.load(
+      link.settings,
+      yEnv.filter((_, i) => d.shapes[i]),
+      'box',
+      d.strokes,
+    );
+    expect(toolsOf(receiver)).toEqual([[0, start[0], start[1]]]);
+    // Clear removes the start spot with the rest: a reset then starts no colony.
+    const placed = toolsOf(engine).length;
+    engine.clearEnvironment();
+    engine.reset();
+    expect(edits(engine)).toEqual([]);
+    expect(toolsOf(engine)).toHaveLength(placed);
+  });
+});
+
 describe('the food sites while the flow is off, and after a load without shapes', () => {
   it('are not kept while the flow is off, and are those of the list when it turns on', async () => {
     const { engine, sim } = await engineWith({ ...maze.settings(), flow: false });
@@ -1469,7 +1628,7 @@ describe('lattices', () => {
   });
 
   it('give the app’s scenes a grid shaped like the screen', async () => {
-    for (const id of ['three-strains', 'maze', 'light', 'cyclones']) {
+    for (const id of ['three-strains', 'maze', 'foraging-maze', 'cyclones']) {
       const p = jones(id);
       for (const [w, h] of screens) {
         const { sim } = await engineWith(p.settings(), p.env ?? [], canvas(w, h));
@@ -1565,7 +1724,8 @@ describe('lattices', () => {
       ['growth on', growth, most(45_000, BYTES_PER_AGENT + 6, 34), true],
       ['growth on, Capacity 1', { ...growth, capacity: 1 }, most(cells, BYTES_PER_AGENT + 6, 34), true],
       // A backend without the rule (WebGL2 without float blending) runs Capacity 2 as 2 agents per cell, and no growth.
-      ['no rule here, Capacity 2', { ...growth, capacity: 2 }, most(2 * cells, BYTES_PER_AGENT, 0), false],
+      // It runs the scene on the extended model (constrain()), which holds the slime field (ADR 0055).
+      ['no rule here, Capacity 2', { ...growth, capacity: 2 }, most(2 * cells, BYTES_PER_AGENT, SLIME), false],
     ] as const) {
       for (const [more, holds] of [
         [0, true],
@@ -1587,6 +1747,7 @@ describe('lattices', () => {
     expect(most(cells, BYTES_PER_AGENT, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
     expect(most(45_000, BYTES_PER_AGENT + 6, 34)).toBeGreaterThan(most(cells, BYTES_PER_AGENT + 6, 34));
     expect(most(cells, BYTES_PER_AGENT, 0)).toBeGreaterThan(most(2 * cells, BYTES_PER_AGENT, 0));
+    expect(most(2 * cells, BYTES_PER_AGENT, 0)).toBeGreaterThan(most(2 * cells, BYTES_PER_AGENT, SLIME));
   });
 
   // ADR 0028: WebGL2 holds the order of its point passes, 22 B more per agent (BYTES_PER_AGENT_GL). The fit counts the
@@ -1672,14 +1833,321 @@ describe('lattices', () => {
 });
 
 // ADR 0027: the view of a step that moves first holds a third trail and scent from two diffusion passes on, and the
-// memory fit counts them. 2048 × 1280 cells with 3.2 agents per cell fit 512 MiB at 98 + 102.4 B per cell, not with
-// 24 B more.
+// memory fit counts them. 2048 × 1280 cells with 2.7 agents per cell fit 512 MiB at 102 + 15 + 86.4 B per cell (the
+// cells, the slime field with its picture, the agents), not with 24 B more.
 describe('the memory fit of the view', () => {
   it('counts the third trail and scent of a step that moves first with two passes', async () => {
     const engine = await Engine.create(canvas(), defaultSettings(), undefined, new CpuBackend());
-    const s = { ...defaultSettings(), resolution: 2048, density: 3.2, diffusion: 2 };
+    const s = { ...defaultSettings(), resolution: 2048, density: 2.7, diffusion: 2 };
     expect(engine.fit({ ...s, stepOrder: 'sense-first' }).resolution).toBe(2048);
     expect(engine.fit({ ...s, stepOrder: 'move-first' }).resolution).toBe(1536);
     expect(engine.fit({ ...s, stepOrder: 'move-first', diffusion: 1 }).resolution).toBe(2048);
+  });
+});
+
+// ADR 0055, decision 9, ADR 0057 and ADR 0060: the slime field and its picture hold 15 B per cell on both backends. The fit of
+// the grid counts them in the extended model, with a Slime life time above 0 and with 0, so that the setting changes
+// no grid.
+describe('the memory fit of the slime field', () => {
+  const shrinking300 = presetById('shrinking');
+  if (!shrinking300) throw new Error('no preset shrinking');
+  const jones = shrinking300.settings(); // 300 × 300 cells, a dish with 45,000 agents
+  const extended: Settings = { ...jones, model: 'extended' };
+  const cells = 300 * 300;
+  /** The most bytes per cell of the backend at which 300 × 300 cells still fit, with `extra` bytes more per cell. */
+  const most = (extra: number) => Math.floor((memoryBudget() - 45_000 * BYTES_PER_AGENT) / cells) - extra;
+
+  it('counts 15 B per cell in the extended model, whatever the life time, and none in the Jones model', async () => {
+    expect([jones.model, jones.lattice, SLIME]).toEqual(['jones', [300, 300], 15]);
+    for (const [what, settings, extra] of [
+      ['the Jones model', jones, 0],
+      ['the extended model', extended, SLIME],
+      ['the extended model without slime', { ...extended, slimeLife: 0 }, SLIME],
+      ['the extended model with the longest life time', { ...extended, slimeLife: 240 }, SLIME],
+    ] as const)
+      for (const [more, holds] of [
+        [0, true],
+        [1, false],
+      ] as const) {
+        const backend = new CpuBackend();
+        backend.bytesPerCell = most(extra) + more;
+        const engine = await Engine.create(canvas(1280, 720), settings, undefined, backend);
+        const at = `${what}, ${most(extra) + more} B per cell`;
+        expect(engine.settings.model, at).toBe(settings.model);
+        expect(engine.settings.lattice, at).toEqual(holds ? [300, 300] : null);
+      }
+    expect(most(0)).toBe(most(SLIME) + 15);
+  });
+
+  it('keeps the simulation and its grid when the life time changes: no restart, no rebuild', async () => {
+    const backend = new CpuBackend();
+    backend.bytesPerCell = most(SLIME);
+    const engine = await Engine.create(canvas(1280, 720), extended, undefined, backend);
+    const [sim, restarts] = [engine.sim, engine.restarts];
+    engine.frame(0, 3);
+    for (const slimeLife of [0, 18, 240, 144]) {
+      await engine.apply({ ...engine.settings, slimeLife });
+      expect(engine.settings.slimeLife).toBe(slimeLife);
+      expect(engine.settings.lattice).toEqual([300, 300]);
+    }
+    expect(engine.sim).toBe(sim);
+    expect(engine.restarts).toBe(restarts);
+    expect(engine.sim.step).toBe(3);
+  });
+
+  it('lowers the grid when a switch to the extended model adds the field to a grid that just fits', async () => {
+    const backend = new CpuBackend();
+    backend.bytesPerCell = most(0);
+    const told: string[] = [];
+    const engine = await Engine.create(canvas(1280, 720), jones, (m) => told.push(m), backend);
+    expect([engine.settings.lattice, told.length]).toEqual([[300, 300], 0]);
+    await engine.apply(extended);
+    expect([engine.settings.model, engine.settings.lattice, told.length]).toEqual(['extended', null, 1]);
+  });
+});
+
+// ADR 0055, decision 7: a brush paints slime. The edit list holds its strokes, as it holds food and walls, and the
+// simulation holds the field. A reset clears every stamp, so the engine paints the slime of the list again after it.
+// The CPU backend paints the field with the reference of the brush (slime-reference.ts), one stroke after another;
+// slime.gpu.test.ts compares that reference with both GPU backends.
+describe('painted slime', () => {
+  /** The Maze: the extended model in a box of 512 × 320 cells, with walls, and without colonies that take steps. */
+  const mazeSettings = maze.settings();
+  const stamps = (sim: CpuSim) => sim.slime ?? new Uint32Array(sim.width * sim.height);
+  const stamped = (field: Uint32Array) => field.reduce((n, v) => n + (v === 0 ? 0 : 1), 0);
+  /**
+   * The field of a list on the grid of a simulation, one edit after another: its environment first, then what it does
+   * with the field. Every stamp is the one of `step`.
+   */
+  function fieldOf(list: readonly EnvEdit[], sim: CpuSim, boundary: Boundary, step = 0) {
+    const { width, height } = sim;
+    const env = new Uint8Array(width * height * 4);
+    const field = new Uint32Array(width * height);
+    for (const e of list) {
+      const stroke = strokeOn(e, width, height);
+      if (!stroke) continue;
+      paintReference(env, width, height, stroke, e.boundary);
+      slimePaint({ width, height, boundary, env }, { model: 'extended' }, step, field, stroke);
+    }
+    return field;
+  }
+  /** A coat of slime across the middle of the Maze, over three of its walls, in the frame of the box. */
+  const coat: EnvShape = { kind: 'slime', at: [-0.5, 0.02], to: [0.5, 0.02], r: 0.12 };
+
+  it('of a scene is there after the reset of a load, with the stamp of step 0, before a colony takes a step', async () => {
+    expect([mazeSettings.model, mazeSettings.boundary, mazeSettings.slimeLife]).toEqual(['extended', 'box', 144]);
+    // The start layout Food places its colony with one step after the reset (seedAtFood()).
+    const settings: Settings = { ...mazeSettings, layout: 'food' };
+    const { engine, sim } = await engineWith(settings, [...mazeEnv, coat]);
+    // The load paints the shapes, resets, and paints the slime again: the reset cleared it.
+    const { calls } = sim();
+    expect(calls.slice(calls.lastIndexOf('clear'))).toEqual([
+      'clear',
+      ...mazeEnv.map(() => 'paint'),
+      'paint',
+      'reset',
+      'slime',
+    ]);
+    expect([sim().tools.length, sim().step]).toEqual([1, 1]);
+    const field = stamps(sim());
+    expect(field).toEqual(fieldOf(edits(engine), sim(), 'box'));
+    expect(new Set(field)).toEqual(new Set([0, stampOf(0)]));
+    // The coat is 320 cells long and 76.8 cells wide, less the cells of the walls that it crosses.
+    const walls = [...field.keys()].filter((c) => (sim().env[c * 4] ?? 0) >= 128);
+    const whole = fieldOf([fromShape(coat, 'box')], sim(), 'box');
+    expect(stamped(whole)).toBeGreaterThan(28_000);
+    expect(stamped(field)).toBeLessThan(stamped(whole) - 300);
+    expect(walls.filter((c) => field[c] !== 0)).toEqual([]);
+    expect(walls.filter((c) => whole[c] !== 0).length).toBe(stamped(whole) - stamped(field));
+
+    // Five steps later a stroke of the tool has the stamp of the next step, the seventh, and the coat keeps its own.
+    // The cell (256, 166) lies in the middle wall of the Maze.
+    engine.frame(0, 5);
+    engine.paint({ kind: 'slime', from: [60, 40], to: [90, 40], radius: 6 });
+    engine.frame(0, 0);
+    expect(sim().step).toBe(6);
+    const at = (x: number, y: number) => stamps(sim())[y * 512 + x];
+    expect([at(75, 40), at(300, 166), at(256, 166)]).toEqual([stampOf(6), stampOf(0), 0]);
+    // A reset of the run: the reset clears every stamp, and both are slime of the age 0 at the start again.
+    engine.reset();
+    expect(stamps(sim())).toEqual(fieldOf(edits(engine), sim(), 'box'));
+    expect([at(75, 40), at(300, 166), at(256, 166), sim().step]).toEqual([stampOf(0), stampOf(0), 0, 1]);
+    expect(sim().calls.slice(-2)).toEqual(['reset', 'slime']);
+    // A scene without painted slime paints nothing after its reset.
+    const plain = await engineWith(settings, mazeEnv);
+    expect(plain.sim().calls.at(-1)).toBe('reset');
+    expect(plain.sim().slime).toBeUndefined();
+  });
+
+  it('is the field of the strokes in their order after a reset, on a new simulation and after the Jones model', async () => {
+    const { engine, sim } = await engineWith(mazeSettings, mazeEnv);
+    // Slime across walls of the Maze, a new wall and an erase over it, slime again over both, and food on it. A frame
+    // after every stroke: the simulation paints one stroke after another.
+    const strokes: Stroke[] = [
+      { kind: 'slime', from: [100, 160], to: [400, 170], radius: 30 },
+      { kind: 'wall', from: [200, 120], to: [200, 210], radius: 3 },
+      { kind: 'erase', from: [150, 165], to: [260, 165], radius: 12 },
+      { kind: 'slime', from: [180, 150], to: [230, 150], radius: 9 },
+      { kind: 'food', from: [300, 165], to: [300, 165], radius: 6 },
+      { kind: 'erase', from: [330, 100], to: [330, 240], radius: 5 },
+      { kind: 'slime', from: [330, 170], to: [330, 170], radius: 4 },
+    ];
+    for (const stroke of strokes) {
+      engine.paint(stroke);
+      engine.frame(0, 0);
+    }
+    const inOrder = stamps(sim()).slice();
+    expect(inOrder).toEqual(fieldOf(edits(engine), sim(), 'box'));
+    expect(stamped(inOrder)).toBeGreaterThan(10_000);
+    const at = (field: Uint32Array, x: number, y: number) => field[y * 512 + x];
+    // Under the first erase and beside the second slime; on the new wall; on the erased part of the wall under the
+    // second slime; under the second erase; on the last dab.
+    expect([at(inOrder, 160, 172), at(inOrder, 200, 200), at(inOrder, 200, 158), at(inOrder, 330, 120)]).toEqual([
+      0, 0, 1, 0,
+    ]);
+    expect(at(inOrder, 331, 171)).toBe(1);
+    expect([sim().env[(200 * 512 + 200) * 4], sim().env[(158 * 512 + 200) * 4]]).toEqual([255, 0]);
+
+    // A reset clears the field, and the engine paints the slime of the list against the walls of now.
+    engine.reset();
+    expect(stamps(sim())).toEqual(inOrder);
+    // A new simulation paints every edit, resets, and paints the slime again.
+    const old = sim();
+    await engine.apply({ ...engine.settings, density: 0.3 });
+    expect(sim()).not.toBe(old);
+    expect(stamps(sim())).toEqual(inOrder);
+    expect(sim().calls.slice(-2)).toEqual(['reset', 'slime']);
+
+    // The Jones model has no slime: the field is gone, and strokes paint none. The strokes stay in the list.
+    engine.frame(0, 4);
+    const [same, restarts, list] = [sim(), engine.restarts, edits(engine).length];
+    await engine.apply(toJones(engine.settings));
+    expect([engine.settings.model, sim(), engine.restarts]).toEqual(['jones', same, restarts]);
+    expect(sim().slime).toBeUndefined();
+    engine.paint({ kind: 'slime', from: [60, 280], to: [120, 280], radius: 8 });
+    engine.paint({ kind: 'erase', from: [100, 160], to: [140, 160], radius: 10 });
+    engine.frame(0, 0);
+    engine.reset();
+    expect(sim().slime).toBeUndefined();
+    expect(sim().calls.at(-1)).toBe('reset');
+    expect(edits(engine).length).toBe(list + 2);
+    // Back in the extended model, without a reset: the painted slime only, with the stamp of the current step.
+    engine.frame(0, 3);
+    const calls = sim().calls.length;
+    await engine.apply({ ...engine.settings, model: 'extended' });
+    expect([engine.settings.model, sim(), engine.restarts, sim().step]).toEqual(['extended', same, restarts + 1, 3]);
+    expect(sim().calls.slice(calls)).toEqual(['slime']);
+    const back = fieldOf(edits(engine), sim(), 'box', 3);
+    expect(stamps(sim())).toEqual(back);
+    expect(new Set(back)).toEqual(new Set([0, stampOf(3)]));
+    // The strokes of the time in the Jones model are in it: the new slime, and the erase over the old one.
+    expect([at(back, 90, 280), at(back, 110, 160), at(back, 380, 170)]).toEqual([stampOf(3), 0, stampOf(3)]);
+  });
+
+  it('leaves the list with an erase that the sweep deletes, and that erase still clears the slime of the colony', async () => {
+    const { engine, sim } = await engineWith(mazeSettings, []);
+    const cells = 512 * 320;
+    /** The slime that a colony left everywhere, which the CPU backend cannot make: the test writes its stamps. */
+    const colony = () => (sim().slime = new Uint32Array(cells).fill(stampOf(7)));
+    colony();
+    let calls = sim().calls.length;
+    // An erase over no edit: the sweep deletes it in paint(), before a frame painted it.
+    engine.paint({ kind: 'erase', from: [100, 100], to: [140, 100], radius: 8 });
+    expect(edits(engine)).toEqual([]);
+    // The simulation got it first: its cells hold no stamp.
+    expect(sim().calls.slice(calls)).toEqual(['paint']);
+    const cleared = cells - stamped(stamps(sim()));
+    // A capsule of 40 by 16 cells with two half discs of radius 8.
+    expect(Math.abs(cleared - (40 * 16 + Math.PI * 64))).toBeLessThan(12);
+    expect([stamps(sim())[100 * 512 + 120], stamps(sim())[100 * 512 + 160]]).toEqual([0, stampOf(7)]);
+    engine.frame(0, 0);
+    expect(sim().calls.slice(calls)).toEqual(['paint']);
+
+    // A wall and an erase over all of it, before a frame: both leave the list, and both cleared stamps first.
+    colony();
+    calls = sim().calls.length;
+    engine.paint({ kind: 'wall', from: [300, 200], to: [340, 200], radius: 3 });
+    engine.paint({ kind: 'erase', from: [300, 200], to: [340, 200], radius: 3 });
+    expect(edits(engine)).toEqual([]);
+    expect(sim().calls.slice(calls)).toEqual(['paint', 'paint']);
+    expect(count(sim().env, 0)).toBe(0);
+    expect([stamps(sim())[200 * 512 + 320], stamps(sim())[210 * 512 + 320]]).toEqual([0, stampOf(7)]);
+
+    // Painted slime under an erase goes with it, and a later reset paints none.
+    engine.paint({ kind: 'slime', from: [400, 60], to: [430, 60], radius: 6 });
+    engine.frame(0, 0);
+    expect(stamps(sim())[60 * 512 + 415]).toBe(stampOf(0));
+    engine.paint({ kind: 'erase', from: [400, 60], to: [430, 60], radius: 6 });
+    expect(edits(engine)).toEqual([]);
+    expect(stamps(sim())[60 * 512 + 415]).toBe(0);
+    engine.reset();
+    expect(stamped(stamps(sim()))).toBe(0);
+    expect(sim().calls.at(-1)).toBe('reset');
+
+    // The Jones model has no field: an erase that clears no edit leaves the list without a paint, as before.
+    const jones = await engineWith(toJones(mazeSettings), []);
+    const before = jones.sim().calls.length;
+    jones.engine.paint({ kind: 'erase', from: [100, 100], to: [140, 100], radius: 8 });
+    expect(edits(jones.engine)).toEqual([]);
+    jones.engine.frame(0, 0);
+    expect(jones.sim().calls.length).toBe(before);
+  });
+
+  it('goes with Clear, the painted slime and the slime of the colony, and stays gone after a reset', async () => {
+    const { engine, sim } = await engineWith(mazeSettings, [...mazeEnv, coat]);
+    engine.paint({ kind: 'slime', from: [60, 40], to: [90, 40], radius: 6 });
+    engine.frame(0, 0);
+    const field = stamps(sim());
+    // A cell that only the colony reached.
+    field[300 * 512 + 20] = stampOf(4);
+    expect(stamped(field)).toBeGreaterThan(20_000);
+    engine.clearEnvironment();
+    expect(stamped(stamps(sim()))).toBe(0);
+    expect(edits(engine)).toEqual([]);
+    engine.reset();
+    expect(stamped(stamps(sim()))).toBe(0);
+    expect(sim().calls.at(-1)).toBe('reset');
+  });
+
+  it('comes with a shared link, on the grid of the sender and on another grid', async () => {
+    const c = canvas();
+    const sender = await engineWith(mazeSettings, mazeEnv, c);
+    const strokes: Stroke[] = [
+      { kind: 'slime', from: [100, 160], to: [400, 170], radius: 30 },
+      { kind: 'wall', from: [200, 120], to: [200, 210], radius: 3 },
+      { kind: 'erase', from: [150, 165], to: [260, 165], radius: 12 },
+      { kind: 'slime', from: [180, 150], to: [230, 150], radius: 9 },
+      { kind: 'slime', from: [500, 300], to: [530, 330], radius: 14 }, // across the corner of the box
+    ];
+    for (const stroke of strokes) sender.engine.paint(stroke);
+    sender.engine.frame(0, 0);
+    const list = sender.engine.envList();
+    expect(list.filter((e) => e.kind === 'slime')).toHaveLength(3);
+    const { hash, dropped } = await encodeLink(sender.engine.settings, drawingOf(list, 'maze', mazeEnv, 'box', [0]));
+    expect(dropped).toBe(false);
+    const link = await decodeLink(hash);
+    const d = link?.drawing;
+    if (!link || !d) throw new Error('no drawing in the link');
+    // The link holds the Slime life time, so the receiver has slime, and the strokes as they were recorded.
+    expect([link.settings.model, link.settings.slimeLife]).toEqual(['extended', 144]);
+    expect(d.strokes).toEqual(list.slice(mazeEnv.length));
+    const rc = canvas();
+    const receiver = await Engine.create(rc, link.settings, undefined, new CpuBackend());
+    await receiver.load(
+      link.settings,
+      mazeEnv.filter((_, i) => d.shapes[i]),
+      'box',
+      d.strokes,
+    );
+    const field = () => stamps(receiver.sim as CpuSim);
+    expect(field()).toEqual(stamps(sender.sim()));
+    expect(stamped(field())).toBeGreaterThan(10_000);
+    // A square screen with a coarser grid for both.
+    for (const x of [c, rc]) [x.width, x.height] = [1000, 1000];
+    await sender.engine.apply({ ...sender.engine.settings, resolution: 256 });
+    await receiver.apply({ ...receiver.settings, resolution: 256 });
+    expect([receiver.sim.width, receiver.sim.height]).toEqual([256, 256]);
+    expect(field()).toEqual(stamps(sender.sim()));
+    expect(stamped(field())).toBeGreaterThan(2_000);
   });
 });

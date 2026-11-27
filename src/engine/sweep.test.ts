@@ -2,13 +2,14 @@
 // kind, in every arena, on grids of every shape, compared after every recorded stroke with the list that keeps every
 // stroke recorded since the grid on screen last changed, both painted with paintReference.
 import { describe, expect, it } from 'vitest';
-import type { Boundary } from '../model/params';
+import { toJones, type Boundary } from '../model/params';
 import { presetById } from '../model/presets';
 import { dishRadius, paintsCell, SLACK } from './brush';
 import { CpuBackend, type CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
 import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
 import { paintReference } from './paint-reference';
+import { slimePaint } from './slime-reference';
 import { compact, Placement, sweep } from './sweep';
 import type { EnvTool, Stroke } from './types';
 
@@ -34,28 +35,69 @@ function replay(list: readonly EnvEdit[], w: number, h: number) {
   return env;
 }
 
-const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && Buffer.compare(a, b) === 0;
+/**
+ * The slime field of a list on a `w` × `h` grid of a simulation in the arena `boundary` (ADR 0055, decision 7): every
+ * edit in its order, its environment first and then what it does with the field (slime-reference.ts), as a simulation
+ * paints one stroke after another. Before the first step, so every stamp is the one of step 0.
+ */
+function replaySlime(list: readonly EnvEdit[], w: number, h: number, boundary: Boundary) {
+  const env = new Uint8Array(w * h * 4);
+  const stamps = new Uint32Array(w * h);
+  for (const e of list) {
+    const s = strokeOn(e, w, h);
+    if (!s) continue;
+    paintReference(env, w, h, s, e.boundary);
+    slimePaint({ width: w, height: h, boundary, env }, { model: 'extended' }, 0, stamps, s);
+  }
+  return stamps;
+}
+
+/** The bytes of an array of bytes or of stamps, without a copy. */
+const bytesOf = (a: Uint8Array | Uint32Array) => Buffer.from(a.buffer, a.byteOffset, a.byteLength);
+const same = (a: Uint8Array | Uint32Array, b: Uint8Array | Uint32Array) =>
+  a.length === b.length && Buffer.compare(bytesOf(a), bytesOf(b)) === 0;
 const BOUNDARIES = ['dish', 'box', 'wrap'] as const;
+/** The kinds of the random strokes: food, the poles, light, walls and erases, as often as before ADR 0055. */
+const KINDS: readonly EnvTool[] = [
+  'food',
+  'food',
+  'cathode',
+  'anode',
+  'light',
+  'wall',
+  'wall',
+  'erase',
+  'erase',
+  'erase',
+  'erase',
+];
+/** With painted slime (ADR 0055): slime, walls and erases most of all. */
+const SLIMY: readonly EnvTool[] = [
+  'slime',
+  'slime',
+  'slime',
+  'slime',
+  'food',
+  'light',
+  'wall',
+  'wall',
+  ...KINDS.slice(7),
+];
 
 /**
  * A random stroke on a `w` × `h` grid in `arena`, near one of a few spots, so that strokes often lie on top of each
  * other: by the edges, on the periodic seam, on the dish's rim, in the middle, also on a copy of a periodic grid.
  */
-function strokeNear(rand: () => number, spots: [number, number][], w: number, h: number, arena: Boundary): Stroke {
+function strokeNear(
+  rand: () => number,
+  spots: [number, number][],
+  w: number,
+  h: number,
+  arena: Boundary,
+  kinds = KINDS,
+): Stroke {
   const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
-  const kind = pick<EnvTool>([
-    'food',
-    'food',
-    'cathode',
-    'anode',
-    'light',
-    'wall',
-    'wall',
-    'erase',
-    'erase',
-    'erase',
-    'erase',
-  ]);
+  const kind = pick<EnvTool>(kinds);
   const [u, v] = pick(spots);
   const copy = arena === 'wrap' && rand() < 0.15 ? [pick([-1, 1]) * w, pick([-1, 0, 1]) * h] : [0, 0];
   const from: [number, number] = [
@@ -171,10 +213,166 @@ describe('the sweep', () => {
   }, 120_000);
 });
 
+// ADR 0055, decision 7: painted slime is an edit that paints, and an erase and a wall clear it. A stroke of the Slime
+// tool stamps only cells without a wall, so the field of a list depends on the walls of the edits before it. The sweep
+// must change no stamp on the grid on screen either.
+describe('the sweep with painted slime', () => {
+  const [w, h] = [128, 96];
+  const dab = (kind: EnvTool, x: number, y: number, radius: number, arena: Boundary = 'box') =>
+    fromStroke({ kind, from: [x, y], to: [x, y], radius }, [w, h], arena);
+  const swept = (list: EnvEdit[]) => [...sweep(new Placement(w, h, list))];
+  const stamps = (list: readonly EnvEdit[]) => replaySlime(list, w, h, 'box').filter((v) => v !== 0).length;
+
+  it('deletes painted slime that an erase covers completely, with the erase, and keeps both when it covers a part', () => {
+    const whole = [dab('food', 100, 20, 3), dab('slime', 40, 40, 4), dab('erase', 40, 40, 6)];
+    expect([stamps(whole.slice(0, 2)), stamps(whole)]).toEqual([52, 0]);
+    // The slime goes, and then the erase clears no edit that stays.
+    expect(swept(whole)).toEqual([1, 2]);
+    const part = [dab('food', 100, 20, 3), dab('slime', 40, 40, 6), dab('erase', 42, 40, 3)];
+    expect(stamps(part)).toBeGreaterThan(60);
+    expect(stamps(part)).toBeLessThan(stamps(part.slice(0, 2)));
+    expect(swept(part)).toEqual([]);
+    // A drag of the eraser over a drag of the Slime tool, a row at a time.
+    const drag: EnvEdit[] = [];
+    for (let x = 30; x < 50; x += 4)
+      drag.push(fromStroke({ kind: 'slime', from: [x, 60], to: [x + 4, 60], radius: 2 }, [w, h], 'box'));
+    for (const y of [58.5, 61.5])
+      for (let x = 26; x < 54; x += 4)
+        drag.push(fromStroke({ kind: 'erase', from: [x, y], to: [x + 4, y], radius: 2.5 }, [w, h], 'box'));
+    const list = drag.slice(0, 5);
+    const placement = new Placement(w, h, list);
+    let gone = 0;
+    for (const erase of drag.slice(5)) {
+      list.push(erase);
+      placement.push(erase);
+      const found = sweep(placement);
+      gone += found.size;
+      compact(list, found);
+      placement.remove(found);
+    }
+    expect([stamps(drag), list, gone]).toEqual([0, [], drag.length]);
+  });
+
+  it('deletes painted slime that a wall covers completely, and keeps the wall', () => {
+    const whole = [dab('slime', 40, 40, 3), dab('wall', 40, 40, 5)];
+    expect([stamps(whole.slice(0, 1)), stamps(whole)]).toEqual([32, 0]);
+    expect(swept(whole)).toEqual([0]);
+    const part = [dab('slime', 40, 40, 6), dab('wall', 42, 40, 3)];
+    expect(swept(part)).toEqual([]);
+    // No wall holds a stamp, with the slime before the wall and after it.
+    expect(stamps(part)).toBe(stamps([part[1], part[0]] as EnvEdit[]));
+    expect(stamps(part)).toBeLessThan(stamps(part.slice(0, 1)));
+  });
+
+  it('lets a stroke of the Slime tool clear nothing, and keeps an erase while painted slime lies under it', () => {
+    // Slime over food and over a wall: the last stroke clears nothing, so no sweep runs for it.
+    const over = [dab('food', 40, 40, 3), dab('wall', 60, 40, 3), dab('slime', 50, 40, 20)];
+    expect(swept(over)).toEqual([]);
+    // An erase beside the slime clears no edit and goes. One over a part of it stays, also when a food under it went.
+    expect(swept([dab('slime', 40, 40, 3), dab('erase', 80, 40, 3)])).toEqual([1]);
+    const under = [dab('food', 40, 40, 2), dab('slime', 44, 40, 5), dab('erase', 40, 40, 3.5)];
+    expect(swept(under)).toEqual([0]);
+    // The erase over a wall that an older stroke of the Slime tool reaches: the wall goes with a later erase, and the
+    // field of the list stays the field of every stroke.
+    const walled = [dab('slime', 40, 40, 8), dab('wall', 40, 40, 2), dab('slime', 40, 40, 6), dab('erase', 40, 40, 3)];
+    const gone = new Set(swept(walled));
+    expect([...gone]).toEqual([1]);
+    const kept = walled.filter((_, i) => !gone.has(i));
+    expect(same(replaySlime(kept, w, h, 'box'), replaySlime(walled, w, h, 'box'))).toBe(true);
+    expect(stamps(walled)).toBeGreaterThan(100);
+  });
+
+  it('changes no byte and no stamp on the grid on screen, after every recorded stroke of random sequences', () => {
+    const GRIDS = [
+      [237, 512],
+      [96, 60],
+      [61, 37],
+      [128, 128],
+    ] as const;
+    let [checks, deleted, slime, stamped] = [0, 0, 0, 0];
+    for (let seed = 1; seed <= 120; seed++) {
+      const rand = rng(7000 + seed);
+      const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
+      const [w, h] = pick(GRIDS);
+      let arena: Boundary = pick(BOUNDARIES);
+      const spots = spotsOf(rand, w, h);
+      const list: EnvEdit[] = [];
+      /** Every stroke of the sequence. */
+      const full: EnvEdit[] = [];
+      const placement = new Placement(w, h, list, seed % 2 ? 0 : undefined);
+      let prev: Stroke | undefined;
+      for (let op = 0; op < 36; op++) {
+        if (rand() < 0.08) {
+          arena = pick(BOUNDARIES);
+          continue;
+        }
+        const again = prev && rand() < 0.2;
+        const s =
+          prev && again
+            ? { ...prev, kind: pick(['erase', 'wall'] as const), radius: prev.radius + pick([0, 0, 0.5]) }
+            : strokeNear(rand, spots, w, h, arena, SLIMY);
+        const stroke = { ...s, radius: Math.max(MIN_RADIUS, s.radius) };
+        if (!paintsCell(stroke, w, h, arena)) continue;
+        prev = stroke;
+        const edit = fromStroke(stroke, [w, h], arena);
+        list.push(edit);
+        full.push(edit);
+        placement.push(edit);
+        if (edit.kind === 'erase' || edit.kind === 'wall') {
+          const gone = sweep(placement);
+          deleted += gone.size;
+          for (const i of gone) if (list[i]?.kind === 'slime') slime++;
+          compact(list, gone);
+          placement.remove(gone);
+        }
+        checks++;
+        if (!same(replay(list, w, h), replay(full, w, h)))
+          expect.fail(`seed ${seed}, op ${op}: ${w} × ${h}, bytes, ${JSON.stringify(full.slice(-6))}`);
+        // The field of the simulation in every arena that it can run in: a reset paints the slime of the list again.
+        for (const boundary of BOUNDARIES) {
+          const [kept, all] = [replaySlime(list, w, h, boundary), replaySlime(full, w, h, boundary)];
+          if (!same(kept, all))
+            expect.fail(
+              `seed ${seed}, op ${op}: ${w} × ${h}, stamps in ${boundary}, ${JSON.stringify(full.slice(-6))}`,
+            );
+          stamped += all.some((v) => v !== 0) ? 1 : 0;
+        }
+      }
+    }
+    // The sequences delete a good share of their strokes, painted slime among them, and most fields hold slime.
+    expect(checks).toBeGreaterThan(2500);
+    expect(deleted).toBeGreaterThan(500);
+    expect(slime).toBeGreaterThan(150);
+    expect(stamped).toBeGreaterThan(checks);
+  }, 120_000);
+});
+
 // Clearing strokes count their cells with the rim moved in by SLACK and a hair of float64 rounding more: on a 2201 × 2201
 // dish the centre of cell (1389, 101) lies 6.8e-7 cells inside the rim moved in by SLACK, within that hair of 1.04e-6
 // (2026-11-11, for Jones' dish of ADR 0027: a search of every grid side from 16 to 4,096, square and with sides of
 // either parity, found no smaller grid with such a cell). The edit stays (mutant IV4).
+// ADR 0066: a start spot of a scene paints nothing. Nothing on screen shows it, so no stroke clears it: the sweep keeps
+// it under an erase and a wall, and it keeps no erase that clears nothing else.
+describe('the sweep with a start spot', () => {
+  const [w, h] = [128, 96];
+  const dab = (kind: EnvTool, x: number, y: number, radius: number) =>
+    fromStroke({ kind, from: [x, y], to: [x, y], radius }, [w, h], 'box');
+  const swept = (list: EnvEdit[]) => [...sweep(new Placement(w, h, list))];
+
+  it('keeps a start spot under an erase and a wall, and lets an erase over it go', () => {
+    expect(swept([dab('start', 40, 40, 2), dab('erase', 40, 40, 6)])).toEqual([1]);
+    expect(swept([dab('start', 40, 40, 2), dab('wall', 40, 40, 6)])).toEqual([]);
+    // A food under the same erase goes with the erase, and the start spot beside it stays.
+    expect(swept([dab('food', 40, 40, 2), dab('start', 40, 40, 2), dab('erase', 40, 40, 6)])).toEqual([0, 2]);
+    // The same in a long list, where the placement finds the strokes by its tiles.
+    const many = Array.from({ length: 300 }, (_, i) => dab('food', 8 + (i % 20) * 6, 8 + Math.floor(i / 20) * 5, 1));
+    const list = [...many, dab('start', 40, 40, 2), dab('erase', 40, 40, 6)];
+    const gone = swept(list);
+    expect(gone).toContain(list.length - 1);
+    expect(gone).not.toContain(many.length);
+  });
+});
+
 describe('the sweep at the rim', () => {
   it('keeps an edit whose cell lies within a hair inside the rim moved in, under an erase there', () => {
     const [w, h] = [2201, 2201];
@@ -351,5 +549,88 @@ describe('the engine with the sweep', () => {
     }
     expect(ops).toBe(24 * 30);
     expect(swept).toBeGreaterThan(20);
+  }, 120_000);
+});
+
+// ADR 0055, decision 7: the slime field of the simulation is the field of the engine's list, one edit after another,
+// after every operation: strokes of every kind with the sweeps after them, a reset, a new simulation, a new arena, a
+// Clear, a load, and a switch to the Jones model and back. The CPU simulation paints each new stroke when it comes, and
+// after a reset the engine paints the slime of its list again against the walls of now. No step runs, so every stamp
+// is the one of step 0.
+describe('the engine with painted slime', () => {
+  const CANVASES = [
+    [1600, 1000], // 512 × 320
+    [1000, 1000], // 512 × 512
+    [474, 1024], // 237 × 512
+  ] as const;
+  const edits = (e: Engine) => (e as unknown as { edits: EnvEdit[] }).edits;
+
+  it('holds in the simulation the field of its list, after every operation of random sequences', async () => {
+    let [ops, swept, slimy, jones] = [0, 0, 0, 0];
+    for (let seed = 1; seed <= 24; seed++) {
+      const rand = rng(3000 + seed);
+      const pick = <T>(list: readonly T[]) => list[Math.floor(rand() * list.length)] as T;
+      const [cw, ch] = pick(CANVASES);
+      const canvas = { width: cw, height: ch } as HTMLCanvasElement;
+      const backend = new CpuBackend();
+      const p = presetById(pick(['maze', 'three-strains', 'steiner'] as const));
+      if (!p) throw new Error('no preset');
+      // A scene of Jones starts in the extended model here: it has slime from its start.
+      const start = { ...p.settings(), model: 'extended' as const, lattice: null, resolution: 256, seed: 7 };
+      const engine = await Engine.create(canvas, start, undefined, backend);
+      await engine.load(start, p.env ?? []);
+      const sim = () => engine.sim as CpuSim;
+      const strokeOnScreen = () => {
+        const [w, h] = [sim().width, sim().height];
+        return strokeNear(rand, spotsOf(rand, w, h), w, h, engine.settings.boundary, SLIMY);
+      };
+      for (let op = 0; op < 30; op++) {
+        const r = rand();
+        const before = edits(engine).length;
+        if (r < 0.5) {
+          for (let k = 0; k < 1 + Math.floor(rand() * 4); k++) engine.paint(strokeOnScreen());
+        } else if (r < 0.58) {
+          await engine.apply({ ...engine.settings, boundary: pick(BOUNDARIES) });
+        } else if (r < 0.66) {
+          engine.reset();
+        } else if (r < 0.74) {
+          [canvas.width, canvas.height] = pick(CANVASES);
+          await engine.apply({ ...engine.settings, density: Math.round((0.05 + rand() * 0.3) * 100) / 100 });
+        } else if (r < 0.8) {
+          // Strokes while a new grid is allocated: the view still shows the old one.
+          const release = hold(backend);
+          const density = engine.settings.density === 0.21 ? 0.22 : 0.21;
+          const rebuilt = engine.apply({ ...engine.settings, resolution: pick([256, 512] as const), density });
+          for (let k = 0; k < 3; k++) engine.paint(strokeOnScreen());
+          release();
+          await rebuilt;
+        } else if (r < 0.94) {
+          // The Jones model has no field. Back in the extended model the list paints its slime again.
+          const to = engine.settings.model === 'jones' ? { ...engine.settings, model: 'extended' as const } : undefined;
+          await engine.apply(to ?? toJones(engine.settings));
+        } else if (r < 0.97) {
+          engine.clearEnvironment();
+        } else {
+          await engine.load(start, p.env ?? []);
+        }
+        if (edits(engine).length < before) swept++;
+        engine.frame(0, 0);
+        ops++;
+        const [w, h] = [sim().width, sim().height];
+        if (!same(sim().env, replay(edits(engine), w, h))) expect.fail(`seed ${seed}, op ${op}: the bytes`);
+        const field = sim().slime ?? new Uint32Array(w * h);
+        const extended = engine.settings.model === 'extended';
+        const expected = extended ? replaySlime(edits(engine), w, h, engine.settings.boundary) : new Uint32Array(w * h);
+        if (!same(field, expected))
+          expect.fail(`seed ${seed}, op ${op}: the field of the ${engine.settings.model} model is not the list's`);
+        if (field.some((v) => v !== 0)) slimy++;
+        if (!extended) jones++;
+      }
+    }
+    expect(ops).toBe(24 * 30);
+    // Sweeps deleted edits, most fields held slime, and the Jones model ran a good share of the operations.
+    expect(swept).toBeGreaterThan(20);
+    expect(slimy).toBeGreaterThan(250);
+    expect(jones).toBeGreaterThan(80);
   }, 120_000);
 });

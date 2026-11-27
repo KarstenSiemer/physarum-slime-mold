@@ -3,11 +3,14 @@ import {
   attractionSpec,
   capacityOf,
   constrain,
+  CROWN_LEVERS,
+  crownLevers,
   decayForReach,
   defaultSettings,
   defaultStrain,
   fieldText,
   globalSpec,
+  JONES_DENSITY,
   jonesFits,
   MAX_STRAINS,
   MEAN_WINDOW,
@@ -21,10 +24,12 @@ import {
   strainLike,
   strainSpec,
   toJones,
+  withRule,
   type Settings,
   type Spec,
   type Strain,
 } from './params';
+import { SINK_WINDOW, SINKS } from '../engine/sinks';
 import { presetById, PRESETS } from './presets';
 
 const inRange = (v: number, s: Spec) => v >= s.min && v <= s.max;
@@ -151,6 +156,23 @@ describe('sanitize (untrusted input)', () => {
     for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showTubes: v }).showTubes).toBe(true);
   });
 
+  // So is the film of the slime (ADR 0055, decision 8): on for a new scene and for a link from before it, in both
+  // models. The switch changes no other setting.
+  it('keeps the film of the slime on unless a link says false', () => {
+    expect(defaultSettings().showSlime).toBe(true);
+    expect(sanitize({}).showSlime).toBe(true);
+    expect(sanitize({ showSlime: false }).showSlime).toBe(false);
+    for (const v of [true, 0, 'false', {}, null, undefined]) expect(sanitize({ showSlime: v }).showSlime).toBe(true);
+    for (const model of ['jones', 'extended'] as const) {
+      const on = sanitize({ model, collisions: true, slimeLife: 24 });
+      expect(sanitize({ model, collisions: true, slimeLife: 24, showSlime: false })).toEqual({
+        ...on,
+        showSlime: false,
+      });
+      expect(constrain({ ...on, showSlime: false })).toEqual({ ...constrain(on), showSlime: false });
+    }
+  });
+
   it('takes the model, covered food and trail saturation', () => {
     const s = sanitize({ model: 'extended', coveredFood: true, trailSaturation: 40 });
     expect([s.model, s.coveredFood, s.trailSaturation]).toEqual(['extended', true, 40]);
@@ -208,10 +230,14 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
     expect([d.shrinkEvery, d.shrinkWindow, d.shrinkMin, d.shrinkMax]).toEqual([3, 5, 0, 20]);
   });
 
-  it('keeps growth off in every scene but the foraging scenes and the Coarsening network, and in a link without it', () => {
-    // These scenes start as a small colony on a food and grow from it (ADR 0025, 0029, 0031). The Coarsening network
-    // and the Voronoi diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048).
+  it('keeps growth off in the patterns, in the scenes where agents share cells and in a link without it', () => {
+    // The scenes of Start here and of Experiments run the rules of the organism, with growth (ADR 0064): each starts
+    // as a small colony on a food and grows from it (ADR 0025, 0029, 0031). The Coarsening network and the Voronoi
+    // diagram have the growth and shrinkage of their papers (ADR 0045, ADR 0048). The Maze does not grow (ADR 0052).
     const grows = [
+      'three-networks',
+      'two-networks',
+      'light',
       'foraging-maze',
       'snail-maze',
       'corn-maze',
@@ -222,6 +248,11 @@ describe('growth and shrinkage (Jones 2011, ADR 0025)', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'y-maze',
+      'y-maze-both',
+      'y-maze-blank',
+      'slime-everywhere',
+      'crown',
     ];
     for (const p of PRESETS) {
       const s = p.settings();
@@ -342,9 +373,12 @@ describe('flow in the tubes (ADR 0029)', () => {
     expect(globalSpec.flowStrength).toMatchObject({ min: 0.1, max: 32, log: true });
   });
 
-  it('is on in the Maze, in the two Tokyo scenes and in the scenes made for it (ADR 0032)', () => {
+  it('is on in every scene of Start here and of Experiments, and in the Maze (ADR 0029, ADR 0032, ADR 0064)', () => {
     const flowing = [
-      'maze',
+      'three-networks',
+      'two-networks',
+      'light',
+      'foraging-maze',
       'snail-maze',
       'corn-maze',
       'tokyo',
@@ -352,6 +386,12 @@ describe('flow in the tubes (ADR 0029)', () => {
       'food-ring',
       'rival-networks',
       'tokyo-rivals',
+      'y-maze',
+      'y-maze-both',
+      'y-maze-blank',
+      'slime-everywhere',
+      'crown',
+      'maze',
     ];
     expect(PRESETS.filter((p) => p.settings().flow).map((p) => p.id)).toEqual(flowing);
     for (const p of PRESETS) if (p.settings().flow) expect(p.settings().model, p.id).toBe('extended');
@@ -397,6 +437,56 @@ describe('flow in the tubes (ADR 0029)', () => {
     // Without the rule and with several strains too: the flow needs neither.
     const free = sanitize({ ...presetById('three-strains')?.settings(), flow: true });
     expect([free.flow, free.collisions, free.strains.length]).toEqual([true, false, 3]);
+  });
+});
+
+// ADR 0055: the slime field has one setting, its life time in hours of model time.
+describe('Slime life time (ADR 0055)', () => {
+  it('is 144 hours by default, the time of the mark of starved ground of ADR 0054, in whole hours up to 240', () => {
+    expect(defaultSettings().slimeLife).toBe(144);
+    expect(globalSpec.slimeLife).toMatchObject({ label: 'Slime life time', min: 0, max: 240, step: 1 });
+    // The help says what 0 means, and what the time does with the flow.
+    expect(globalSpec.slimeLife.help).toContain('At 0 the model has no slime.');
+    // The picture draws the slime (decision 8), and only the rules of the growth front read it (ADR 0088).
+    expect(globalSpec.slimeLife.help).toContain('as a wet film on the ground');
+    expect(globalSpec.slimeLife.help).toContain('Without the rules of the growth front no rule reads the slime');
+    expect(globalSpec.slimeLife.help).toContain('the growth front takes less flux on slime (Weight on slime)');
+    expect(globalSpec.slimeLife.help).toContain('With Flow in the tubes');
+  });
+
+  it('is the default in every scene, so a scene keeps the time of its starved ground', () => {
+    for (const p of PRESETS) expect(p.settings().slimeLife, p.id).toBe(144);
+  });
+
+  it('is 0 for a link from before the slime field, in the extended model', () => {
+    for (const p of PRESETS) {
+      const { slimeLife: _, ...before } = p.settings();
+      const s = sanitize(before);
+      // The Jones model has no slime: it holds the default, which acts on nothing there.
+      expect(s.slimeLife, p.id).toBe(s.model === 'jones' ? 144 : 0);
+    }
+  });
+
+  it('keeps a life time in the extended model through constrain(), also 0', () => {
+    for (const slimeLife of [0, 1, 18, 144, 240]) {
+      const s = sanitize({ model: 'extended', slimeLife });
+      expect([s.model, s.slimeLife]).toEqual(['extended', slimeLife]);
+      expect(constrain(s)).toBe(s);
+    }
+  });
+
+  it('is no setting of the Jones model: the model binds it to its default', () => {
+    const s = sanitize({ ...presetById('network')?.settings(), slimeLife: 18 });
+    expect([s.model, s.slimeLife]).toEqual(['jones', 144]);
+    expect(constrain(s)).toBe(s);
+    // The switch to Jones takes the life time of a scene back to the default.
+    const maze = presetById('maze')?.settings();
+    if (!maze) throw new Error('no Maze');
+    const t = toJones({ ...maze, slimeLife: 0 });
+    expect([t.model, t.slimeLife]).toEqual(['jones', 144]);
+    // A Jones model that becomes the extended model keeps what it holds.
+    const off = constrain({ ...s, collisions: false });
+    expect([off.model, off.slimeLife]).toEqual(['extended', 144]);
   });
 });
 
@@ -460,10 +550,32 @@ describe('the Jones model', () => {
     expect(jonesFits(s)).toBe(true);
     expect(s.model).toBe('jones');
     expect([s.strains.length, s.collisions, s.diffusion, s.trailSaturation]).toEqual([1, true, 1, 0]);
-    expect(s.density).toBeLessThanOrEqual(1);
+    // The scene holds 3 agents per cell without the rule: with the rule it gets Jones' population (withRule()).
+    expect([three.collisions, three.density, s.density]).toEqual([false, 3, JONES_DENSITY]);
     expect(s.scentDecay).toBe(three.strains[0]?.decay);
     expect(s.strains[0]?.attraction[0]).toBe(1);
     expect(toJones({ ...three, strains: one({ attraction: [-0.7, 1, 0, 0] }) }).strains[0]?.attraction[0]).toBe(-1);
+  });
+
+  // With the rule, Agents per cell is the share of the cells that hold an agent (ADR 0063): at 1 every cell is full.
+  it('gives settings with 1 agent per cell or more Jones’ population when the rule goes on (withRule)', () => {
+    const d = defaultSettings();
+    expect([d.collisions, d.density]).toEqual([false, 1]);
+    for (const density of [1, 1.5, 3, 8]) {
+      const s = withRule({ ...d, density });
+      expect([s.collisions, s.density], String(density)).toEqual([true, 0.15]);
+    }
+    expect(JONES_DENSITY).toBe(0.15);
+    // A value below 1 is a share of the cells with the rule too.
+    for (const density of [0.01, 0.5, 0.99]) {
+      const s = withRule({ ...d, density });
+      expect([s.collisions, s.density], String(density)).toEqual([true, density]);
+    }
+    // The rule is on: the settings stay as they are, also with every cell full, as a link holds them.
+    const full = { ...d, collisions: true, density: 1 };
+    expect(withRule(full)).toBe(full);
+    // The other settings stay.
+    expect(withRule({ ...d, density: 3 })).toEqual({ ...d, collisions: true, density: 0.15 });
   });
 
   it('turns a Jones model without the rule into the extended model', () => {
@@ -756,5 +868,137 @@ describe('the mean window (ADR 0046)', () => {
     expect(meanWindowOf({ model: 'extended', meanWindow: 9 })).toBe(3);
     expect([3, 5, 15].map((meanWindow) => meanWindowOf({ model: 'jones', meanWindow }))).toEqual([3, 5, 15]);
     expect([0, 4, 6.4, 40].map((meanWindow) => meanWindowOf({ model: 'jones', meanWindow }))).toEqual([3, 3, 5, 15]);
+  });
+});
+
+// ADR 0068: the rules of stage 4 are a setting of the extended model, off by default. The Crown of veins (ADR 0087)
+// and the scenes of Reid et al. 2012 (ADR 0088) have them.
+describe('the rules of stage 4 (ADR 0068)', () => {
+  it('are off by default, in every scene but the Crown of veins and those of Reid, and for a link without them', () => {
+    expect(defaultSettings().territory).toBe(false);
+    const rules = ['y-maze', 'y-maze-both', 'y-maze-blank', 'slime-everywhere', 'crown'];
+    for (const p of PRESETS) expect(p.settings().territory, p.id).toBe(rules.includes(p.id));
+    expect(sanitize({ model: 'extended', territory: true }).territory).toBe(true);
+    for (const v of [undefined, 1, 'true', null])
+      expect(sanitize({ model: 'extended', territory: v }).territory).toBe(false);
+  });
+
+  it('never run in the Jones model: the model binds the switch to off', () => {
+    const jones = { ...presetById('network')?.settings(), territory: true };
+    const s = sanitize(jones);
+    expect(s.model).toBe('jones');
+    expect(s.territory).toBe(false);
+    expect(constrain(s)).toBe(s);
+    const maze = presetById('maze')?.settings();
+    if (!maze) throw new Error('no Maze');
+    expect(toJones({ ...maze, territory: true }).territory).toBe(false);
+  });
+
+  // ADR 0070: the drift is a setting of the rules, 1.5 (the crown of ADR 0065, decision 6); the Crown of veins has it
+  // too (ADR 0087).
+  it('have the drift 1.5 by default and in every scene, from 0 to 5, and its default in the Jones model', () => {
+    expect(defaultSettings().drift).toBe(1.5);
+    for (const p of PRESETS) expect(p.settings().drift, p.id).toBe(1.5);
+    expect(sanitize({ model: 'extended', drift: 7 }).drift).toBe(5);
+    expect(sanitize({ model: 'extended', drift: -1 }).drift).toBe(0);
+    expect(sanitize({ model: 'extended', drift: 'x' }).drift).toBe(1.5);
+    expect(sanitize({ model: 'extended', territory: true, drift: 0.5 }).drift).toBe(0.5);
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    expect(jones.model).toBe('jones');
+    expect(constrain({ ...jones, drift: 4 }).drift).toBe(1.5);
+  });
+
+  // ADR 0086: the flux to the front k is a setting of the rules: the sinks take 2 k · I0 together. 1 in every scene
+  // but the Crown of veins, which has the k = 2 of the crown of ADR 0084 (ADR 0087).
+  it('have the flux to the front 1 by default and in the scenes, from 0.25 to 16, and its default in Jones', () => {
+    expect(defaultSettings().frontFlux).toBe(1);
+    for (const p of PRESETS) expect(p.settings().frontFlux, p.id).toBe(p.id === 'crown' ? 2 : 1);
+    expect(sanitize({ model: 'extended', frontFlux: 40 }).frontFlux).toBe(16);
+    expect(sanitize({ model: 'extended', frontFlux: 0 }).frontFlux).toBe(0.25);
+    expect(sanitize({ model: 'extended', frontFlux: 'x' }).frontFlux).toBe(1);
+    expect(sanitize({ model: 'extended', territory: true, frontFlux: 2 }).frontFlux).toBe(2);
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    const bound = constrain({ ...jones, frontFlux: 4 });
+    expect([bound.model, bound.frontFlux]).toEqual(['jones', 1]);
+    expect(constrain(bound)).toBe(bound);
+  });
+
+  // ADR 0088: the weight on slime and the reach to fresh ground are settings of the rules: 0.025 (the owner's decision
+  // of 2026-11-19, ADR 0065, decision 5) and 6 (ADR 0067, decision 10), the constants of before, in every scene.
+  it('have the weight on slime 0.025 and the reach to fresh ground 6 in the scenes, and their defaults in Jones', () => {
+    const d = defaultSettings();
+    expect([d.slimeWeight, d.freshReach]).toEqual([0.025, 6]);
+    for (const p of PRESETS) expect([p.settings().slimeWeight, p.settings().freshReach], p.id).toEqual([0.025, 6]);
+    // A weight of 1 is the weight near fresh ground: the slime then changes no sink.
+    expect(globalSpec.slimeWeight).toMatchObject({ label: 'Weight on slime', min: 0.001, max: 1, log: true });
+    // Whole steps of a path, from the edge of the territory to the window of the passes (sinks.ts).
+    expect(globalSpec.freshReach).toMatchObject({ label: 'Reach to fresh ground', min: SINKS.edge, step: 1 });
+    expect(globalSpec.freshReach.max).toBe(SINK_WINDOW);
+    expect(sanitize({ model: 'extended', slimeWeight: 5 }).slimeWeight).toBe(1);
+    expect(sanitize({ model: 'extended', slimeWeight: 0 }).slimeWeight).toBe(0.001);
+    expect(sanitize({ model: 'extended', slimeWeight: 'x' }).slimeWeight).toBe(0.025);
+    expect(sanitize({ model: 'extended', territory: true, slimeWeight: 0.3 }).slimeWeight).toBe(0.3);
+    expect(sanitize({ model: 'extended', freshReach: 9 }).freshReach).toBe(6);
+    expect(sanitize({ model: 'extended', freshReach: 1 }).freshReach).toBe(2);
+    expect(sanitize({ model: 'extended', freshReach: 3.6 }).freshReach).toBe(4);
+    expect(sanitize({ model: 'extended', freshReach: null }).freshReach).toBe(6);
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    const bound = constrain({ ...jones, slimeWeight: 0.5, freshReach: 3 });
+    expect([bound.model, bound.slimeWeight, bound.freshReach]).toEqual(['jones', 0.025, 6]);
+    expect(constrain(bound)).toBe(bound);
+  });
+});
+
+// ADR 0098: the switch of the rules in the panel sets the levers of the Crown of veins. They are the values of that
+// scene, so the scene and the switch cannot drift apart.
+describe('the levers that the switch of the rules sets (ADR 0098)', () => {
+  it('are the levers of the Crown of veins', () => {
+    const crown = presetById('crown')?.settings();
+    if (!crown) throw new Error('no Crown of veins');
+    const { flowEdges, flowBase, frontFlux, flowStrength } = crown;
+    expect({ flowEdges, flowBase, frontFlux, flowStrength }).toEqual(CROWN_LEVERS);
+  });
+
+  it('raise a lower Flow strength to 8 and keep a higher one', () => {
+    expect(crownLevers({ flowStrength: 2 })).toEqual({ flowEdges: 8, flowBase: 0.002, frontFlux: 2, flowStrength: 8 });
+    expect(crownLevers({ flowStrength: 12 }).flowStrength).toBe(12);
+  });
+});
+
+// ADR 0086: the neighbours of a cell in the flow and the base conductance of a tube are settings of the flow, in force
+// in every scene with Flow in the tubes. Every scene but the Crown of veins has 4 neighbours and 0.02; the Crown has
+// the 8 and 0.002 of the crown of ADR 0084 (ADR 0087).
+describe('the neighbours and the base conductance of the flow (ADR 0086)', () => {
+  it('are 4 and 0.02 by default and in every scene but the Crown of veins', () => {
+    const d = defaultSettings();
+    expect([d.flowEdges, d.flowBase]).toEqual([4, 0.02]);
+    for (const p of PRESETS)
+      expect([p.settings().flowEdges, p.settings().flowBase], p.id).toEqual(p.id === 'crown' ? [8, 0.002] : [4, 0.02]);
+  });
+
+  it('read 4 or 8 neighbours and a base from 0.001 to 0.1 from a link, and the defaults otherwise', () => {
+    expect(sanitize({ model: 'extended', flow: true, flowEdges: 8 }).flowEdges).toBe(8);
+    for (const v of [4, 6, '8', 16, 0, null, true, [8]])
+      expect(sanitize({ model: 'extended', flow: true, flowEdges: v }).flowEdges, JSON.stringify(v)).toBe(4);
+    expect(sanitize({ model: 'extended', flowBase: 1 }).flowBase).toBe(0.1);
+    expect(sanitize({ model: 'extended', flowBase: 0 }).flowBase).toBe(0.001);
+    expect(sanitize({ model: 'extended', flowBase: 'x' }).flowBase).toBe(0.02);
+    expect(sanitize({ model: 'extended', flow: true, flowBase: 0.002 }).flowBase).toBe(0.002);
+    expect(globalSpec.flowBase).toMatchObject({ min: 0.001, max: 0.1, log: true });
+  });
+
+  it('have their defaults in the Jones model', () => {
+    const jones = presetById('network')?.settings();
+    if (!jones) throw new Error('no Network');
+    const s = constrain({ ...jones, flowEdges: 8, flowBase: 0.002 });
+    expect([s.model, s.flowEdges, s.flowBase]).toEqual(['jones', 4, 0.02]);
+    expect(constrain(s)).toBe(s);
+    const maze = presetById('maze')?.settings();
+    if (!maze) throw new Error('no Maze');
+    expect(toJones({ ...maze, flowEdges: 8, flowBase: 0.002 })).toMatchObject({ flow: false, flowEdges: 4 });
+    expect(toJones({ ...maze, flowEdges: 8, flowBase: 0.002 }).flowBase).toBe(0.02);
   });
 });
