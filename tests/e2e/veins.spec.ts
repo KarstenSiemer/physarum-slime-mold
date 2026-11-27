@@ -2,7 +2,7 @@
 // count, in the order of the files, so this test, the longest of all, runs apart from the tests of tubes.spec.ts that
 // wait for steps (ADR 0102).
 import { expect, test } from '@playwright/test';
-import { alive, colonyScene, grow, LIMIT, linked, open } from './colony';
+import { alive, colonyScene, grow, LIMIT, linked, open, WAIT } from './colony';
 import { smallScene, watchErrors } from './helpers';
 
 // The Crown of veins (ADR 0087): the rules of the growth front with the levers of the crown of ADR 0084, which the Flow
@@ -14,10 +14,14 @@ import { smallScene, watchErrors } from './helpers';
 // only after 1,150 to 1,450 steps (`bash research/front/e5b.sh neck`): too many for CI, whose SwiftShader runs the
 // scene at about one step per second in the image on 4 cores (ADR 0087).
 const CROWN_GROWN = 60;
+// The limit of the wait for these steps: twice the limit of the other tests, since this test waits for twice their
+// steps. On GitHub on 2026-11-27 the whole test took 3.4 to 5.9 min in five runs that passed, and the wait went past
+// the 300 s of WAIT in two runs, each time in the retry too (ADR 0103).
+const CROWN_WAIT = 600_000;
 test('the Crown of veins shows its rules and levers in the Flow section, and its front takes flux', async ({
   page,
 }) => {
-  test.setTimeout(LIMIT);
+  test.setTimeout(LIMIT - WAIT + CROWN_WAIT);
   const errors = watchErrors(page);
   await open(page, await smallScene({ resolution: 256 }));
   await page.getByRole('combobox', { name: 'Preset' }).selectOption('crown');
@@ -38,7 +42,7 @@ test('the Crown of veins shows its rules and levers in the Flow section, and its
   const colony = first.alive[0] ?? 0;
   expect(colony).toBeGreaterThan(20);
   expect(colony).toBeLessThan(200);
-  await grow(page, first.step + CROWN_GROWN);
+  await grow(page, first.step + CROWN_GROWN, CROWN_WAIT);
   const later = await page.evaluate(async () => {
     const sim = globalThis.physarum?.sim;
     if (!sim) return { alive: -1, sinks: -1 };

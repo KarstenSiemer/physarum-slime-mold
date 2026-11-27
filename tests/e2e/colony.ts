@@ -16,9 +16,10 @@ export const LIMIT = 480_000;
 
 // A result of the simulation comes with its steps, not with the seconds: a test waits for a step and then reads once.
 // A wait of seconds for a result failed on GitHub, where a slow runner made too few steps (TODO.md, 2026-11-15).
-// The limit of the wait is only a guard against a simulation that stands still.
-export const steps = (page: Page, n: number) =>
-  page.waitForFunction((n) => (globalThis.physarum?.sim.step ?? 0) >= n, n, { timeout: WAIT });
+// The limit of the wait is only a guard against a simulation that stands still. A test that waits for more steps
+// gives its own limit (ADR 0103).
+export const steps = (page: Page, n: number, limit = WAIT) =>
+  page.waitForFunction((n) => (globalThis.physarum?.sim.step ?? 0) >= n, n, { timeout: limit });
 // The agents alive of each strain, and a step that the simulation had reached at most when it counted them.
 export const alive = (page: Page) =>
   page.evaluate(async () => {
@@ -41,11 +42,11 @@ export const colonyScene = (page: Page, width: number) =>
     width,
     { timeout: 150_000 },
   );
-export const grow = async (page: Page, to: number) => {
+export const grow = async (page: Page, to: number, limit = WAIT) => {
   await page.evaluate(() => {
     if (globalThis.physarum) globalThis.physarum.paused = false;
   });
-  await steps(page, to);
+  await steps(page, to, limit);
 };
 
 // The settings that the link of the page holds.
