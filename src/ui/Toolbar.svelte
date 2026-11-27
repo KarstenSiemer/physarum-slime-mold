@@ -48,8 +48,10 @@
         role="radio"
         aria-checked={app.tool === t.id}
         title="{t.help} ({t.key})"
-        onclick={() => (app.tool = t.id)}>{t.label}</button
+        onclick={() => (app.tool = t.id)}
       >
+        {t.label}
+      </button>
     {/each}
   </div>
 
@@ -70,8 +72,10 @@
           aria-checked={app.strain === i}
           aria-label="Strain {letter(i)}"
           style:--c={s.color}
-          onclick={() => (app.strain = i)}>{letter(i)}</button
+          onclick={() => (app.strain = i)}
         >
+          {letter(i)}
+        </button>
       {/each}
     </div>
   {/if}
@@ -86,8 +90,10 @@
           aria-checked={app.pole === pole}
           title={POLE[pole].help}
           style:--c={POLE[pole].color}
-          onclick={() => (app.pole = pole)}>{POLE[pole].label}</button
+          onclick={() => (app.pole = pole)}
         >
+          {POLE[pole].label}
+        </button>
       {/each}
     </div>
   {/if}
@@ -98,8 +104,10 @@
       type="button"
       aria-pressed={app.settings.showScent}
       title="Show the scent of food and {lightName(app.settings.model)} (S)"
-      onclick={() => (app.settings.showScent = !app.settings.showScent)}>Scent</button
+      onclick={() => (app.settings.showScent = !app.settings.showScent)}
     >
+      Scent
+    </button>
     <button type="button" onclick={savePng}>Save PNG</button>
   </div>
 </div>

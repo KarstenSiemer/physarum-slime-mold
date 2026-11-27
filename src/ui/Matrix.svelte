@@ -60,29 +60,37 @@
     class="ghost"
     onclick={() => {
       setAll((r, c) => (r === c ? 1 : -1));
-    }}>Rivals</button
+    }}
   >
+    Rivals
+  </button>
   <button
     type="button"
     class="ghost"
     onclick={() => {
       setAll((r, c) => (r === c ? 1 : 0));
-    }}>Ignore</button
+    }}
   >
+    Ignore
+  </button>
   <button
     type="button"
     class="ghost"
     onclick={() => {
       setAll(() => 1);
-    }}>Merge</button
+    }}
   >
+    Merge
+  </button>
   <button
     type="button"
     class="ghost"
     onclick={() => {
       setAll((r, c) => (r === c ? 1 : c === (r + 1) % strains.length ? 1 : -1));
-    }}>Chase</button
+    }}
   >
+    Chase
+  </button>
 </div>
 
 <style>

@@ -14,7 +14,8 @@ import {
 import { presetById, shapesAt, type EnvShape, type Preset } from '../model/presets';
 import { decodeLink, encodeLink } from '../model/url';
 import { BrushDrag } from '../ui/drag';
-import { CpuBackend, type CpuSim, hold } from './cpu-backend';
+import { CpuBackend, CpuSim, hold } from './cpu-backend';
+import { instance } from './instance';
 import { NO_CELL } from './sites';
 import { Engine } from './engine';
 import { fromFrame, fromShape, fromStroke, strokeOn, type EnvEdit } from './environment';
@@ -57,7 +58,7 @@ const disc = ([x, y]: [number, number], r: number, w: number, h: number) => {
 async function engineWith(settings: Settings, env = mazeEnv, c = canvas(), backend = new CpuBackend()) {
   const engine = await Engine.create(c, settings, undefined, backend);
   await engine.load(settings, env);
-  return { engine, backend, sim: () => engine.sim as CpuSim };
+  return { engine, backend, sim: () => instance(engine.sim, CpuSim) };
 }
 
 const count = (env: Uint8Array, channel: number) => env.filter((v, i) => i % 4 === channel && v !== 0).length;
@@ -631,7 +632,7 @@ describe('food, light and walls on a new simulation', () => {
       engine.paint({ kind: 'wall', from: [10, 10], to: [20, 20], radius: 2 });
     }).not.toThrow();
     await engine.rebuild();
-    expect(empty((engine.sim as CpuSim).env)).toBe(true);
+    expect(empty(instance(engine.sim, CpuSim).env)).toBe(true);
   });
 });
 
@@ -739,7 +740,7 @@ describe('food, light and walls after an arena switch', () => {
         const started = await Engine.create(canvas(w, h), settings, undefined, new CpuBackend());
         await started.load(settings, env, p.settings().boundary);
         expect(started.settings.boundary).toBe(other);
-        expect(differing((started.sim as CpuSim).env, switched.sim().env), `${p.id} on ${w} × ${h}`).toBe(0);
+        expect(differing(instance(started.sim, CpuSim).env, switched.sim().env), `${p.id} on ${w} × ${h}`).toBe(0);
         // Steiner's foods of 0.0135 short sides (ADR 0027) have about 11 cells each on 256 × 144.
         expect(count(switched.sim().env, 1), `${p.id} on ${w} × ${h}`).toBeGreaterThan(30);
       }
@@ -889,7 +890,7 @@ describe('the colonies of the start layout Food', () => {
     const dab = fromStroke({ kind: 'food', from: [300, 100], to: [300, 100], radius: 4 }, [512, 320], 'box');
     const engine = await Engine.create(canvas(), settings, undefined, new CpuBackend());
     await engine.load(settings, [], 'box', [...drag, dab]);
-    const tools = (engine.sim as CpuSim).tools;
+    const tools = instance(engine.sim, CpuSim).tools;
     // Strain A at the start of the drag, strain B on the dab: not on the second segment of the drag.
     expect(tools.map((t) => [t.strain, t.x, t.y])).toEqual([
       [0, 100, 200],
@@ -964,7 +965,7 @@ describe('the start spots of a scene', () => {
     const shape = yEnv[i];
     return shape && strokeOn(fromShape(shape, 'box'), 129, 90)?.from;
   };
-  const toolsOf = (engine: Engine) => (engine.sim as CpuSim).tools.map((t) => [t.strain, t.x, t.y]);
+  const toolsOf = (engine: Engine) => instance(engine.sim, CpuSim).tools.map((t) => [t.strain, t.x, t.y]);
 
   it('start strain A on the start spot, and a strain without one on its own food', async () => {
     expect(yEnv.map((e) => e.kind).filter((k) => k !== 'wall' && k !== 'slime')).toEqual(['start', 'food', 'food']);
@@ -1554,7 +1555,7 @@ describe('a shared link', () => {
         d.strokes,
       );
       expect(receiver.envList()).toEqual(list);
-      const env = () => (receiver.sim as CpuSim).env;
+      const env = () => instance(receiver.sim, CpuSim).env;
       expect([receiver.sim.width, receiver.sim.height]).toEqual([sender.sim().width, sender.sim().height]);
       expect(differing(env(), sender.sim().env), `trial ${trial}, the sender's grid`).toBe(0);
       // Another screen shape and grid for both: a square, then a phone turned upright.
@@ -2139,7 +2140,7 @@ describe('painted slime', () => {
       'box',
       d.strokes,
     );
-    const field = () => stamps(receiver.sim as CpuSim);
+    const field = () => stamps(instance(receiver.sim, CpuSim));
     expect(field()).toEqual(stamps(sender.sim()));
     expect(stamped(field())).toBeGreaterThan(10_000);
     // A square screen with a coarser grid for both.

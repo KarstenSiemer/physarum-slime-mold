@@ -6,11 +6,12 @@ import { dishRadius } from './brush';
 import { Engine, SETTLE_FRAMES, type HeldTool } from './engine';
 import { strokeOn, type EnvEdit } from './environment';
 import { WebGl2Backend } from './gl/backend';
-import type { GlSim } from './gl/sim';
+import { GlSim } from './gl/sim';
 import { OutOfMemoryError } from './gpu';
+import { instance } from './instance';
 import { AgentToolKind, stepChance } from './pack';
 import { paintReference } from './paint-reference';
-import type { Simulation } from './sim';
+import { Simulation } from './sim';
 import type { Backend, Stroke } from './types';
 import { WebGpuBackend } from './webgpu';
 
@@ -545,11 +546,11 @@ describe.each(Object.keys(BACKENDS) as Kind[])('%s: food, light and walls', (kin
     const sim = engine.sim;
     const zeros = new Uint8Array(sim.width * sim.height * 4);
     if (kind === 'webgpu') {
-      const s = sim as Simulation;
+      const s = instance(sim, Simulation);
       s.device.queue.writeBuffer(s.shape, 0, zeros);
     } else {
       const gl = (engine.backend as unknown as { gl: WebGL2RenderingContext }).gl;
-      gl.bindTexture(gl.TEXTURE_2D, (sim as GlSim).shapeTexture);
+      gl.bindTexture(gl.TEXTURE_2D, instance(sim, GlSim).shapeTexture);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, sim.width, sim.height, gl.RGBA, gl.UNSIGNED_BYTE, zeros);
     }
   }
