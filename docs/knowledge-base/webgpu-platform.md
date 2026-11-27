@@ -10,7 +10,7 @@ Script kept in the session scratchpad; the same probe now lives in the e2e test 
 | macOS 26.6, Apple M3 Pro                                             | headless shell, no flags                                       | `null`                                  | WebGPU blocked in headless shell by default                                                                            |
 | macOS                                                                | headless shell, `--enable-unsafe-webgpu`                       | SwiftShader (`isFallbackAdapter: true`) | CPU emulation                                                                                                          |
 | macOS                                                                | `channel: 'chromium'` (new headless), `--enable-unsafe-webgpu` | **Apple `metal-3`**, real GPU           | `shader-f16`, `subgroups`, `timestamp-query`, `float32-filterable`, `texture-formats-tier2`, max storage binding 4 GiB |
-| Linux container `mcr.microsoft.com/playwright:v1.65.0-noble`, no GPU | headless shell or new headless, `--enable-unsafe-webgpu`       | SwiftShader                             | `timestamp-query`, `float32-filterable`, `subgroups`, max storage binding 1 GiB, 256 invocations/workgroup             |
+| Linux container `mcr.microsoft.com/playwright:v1.65.1-noble`, no GPU | headless shell or new headless, `--enable-unsafe-webgpu`       | SwiftShader                             | `timestamp-query`, `float32-filterable`, `subgroups`, max storage binding 1 GiB, 256 invocations/workgroup             |
 
 Facts learned:
 
