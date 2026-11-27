@@ -35,7 +35,7 @@ jobs:
           permission-administration: read # classic branch protection
           permission-metadata: read # rulesets and other repository data; Renovate requires it
           permission-vulnerability-alerts: read
-      - uses: renovatebot/github-action@acdd6bda8b035c99ce59d5675816af2aa65a1774 # v46.3.14
+      - uses: renovatebot/github-action@ebcbb513d07ead4d9c0c2139064301db05e84a3e # v46.3.15
         with:
           token: ${{ steps.app.outputs.token }}
           # Pinned by version and digest; Renovate proposes updates for review (customManagers in renovate.json).
