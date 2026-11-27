@@ -213,9 +213,9 @@
         }}
       >
         {#each lattices as l (latticeValue(l))}
-          <option value={latticeValue(l)}
-            >{latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? latticeOrigin(figure) : ''}</option
-          >
+          <option value={latticeValue(l)}>
+            {latticeText(l)}{sameLattice(l, app.sceneBase?.lattice ?? null) ? latticeOrigin(figure) : ''}
+          </option>
         {/each}
         {#each RESOLUTIONS as r (r)}<option value={String(r)}>{r} cells on the long side</option>{/each}
       </select>
@@ -239,13 +239,13 @@
             setRule(e.currentTarget.checked);
           }}
         />
-        <span
-          >One agent per cell (Jones 2010){app.canCollide
+        <span>
+          One agent per cell (Jones 2010){app.canCollide
             ? extended
               ? ''
               : ': always on in the Jones model'
-            : ': not available here'}</span
-        >
+            : ': not available here'}
+        </span>
       </label>
       <button
         class="help"
@@ -253,8 +253,10 @@
         aria-expanded={ruleHelp}
         aria-controls="rule-help"
         aria-label="About {collisionsHelp.label}"
-        onclick={() => (ruleHelp = !ruleHelp)}>?</button
+        onclick={() => (ruleHelp = !ruleHelp)}
       >
+        ?
+      </button>
     </div>
     {#if ruleHelp}
       <p class="helptext" id="rule-help">
@@ -284,8 +286,10 @@
         aria-expanded={modelHelpOpen}
         aria-controls="model-help"
         aria-label="About {modelHelp.label}"
-        onclick={() => (modelHelpOpen = !modelHelpOpen)}>?</button
+        onclick={() => (modelHelpOpen = !modelHelpOpen)}
       >
+        ?
+      </button>
     </div>
     {#if modelHelpOpen}
       <p class="helptext" id="model-help">{modelHelp.help} <cite>{modelHelp.ref}</cite></p>
@@ -306,8 +310,10 @@
         aria-expanded={orderHelpOpen}
         aria-controls="order-help"
         aria-label="About {stepOrderHelp.label}"
-        onclick={() => (orderHelpOpen = !orderHelpOpen)}>?</button
+        onclick={() => (orderHelpOpen = !orderHelpOpen)}
       >
+        ?
+      </button>
     </div>
     {#if orderHelpOpen}
       <p class="helptext" id="order-help">{stepOrderHelp.help} <cite>{stepOrderHelp.ref}</cite></p>
@@ -380,8 +386,10 @@
         aria-expanded={coveredHelp}
         aria-controls="covered-help"
         aria-label="About {coveredFoodHelp.label}"
-        onclick={() => (coveredHelp = !coveredHelp)}>?</button
+        onclick={() => (coveredHelp = !coveredHelp)}
       >
+        ?
+      </button>
     </div>
     {#if coveredHelp}
       <p class="helptext" id="covered-help">{coveredFoodHelp.help} <cite>{coveredFoodHelp.ref}</cite></p>
@@ -405,13 +413,13 @@
             s.growth = e.currentTarget.checked;
           }}
         />
-        <span
-          >{growthHelp.label} (Jones 2011){app.canCollide
+        <span>
+          {growthHelp.label} (Jones 2011){app.canCollide
             ? s.collisions
               ? ''
               : ': needs one agent per cell'
-            : ': not available here'}</span
-        >
+            : ': not available here'}
+        </span>
       </label>
       <button
         class="help"
@@ -419,8 +427,10 @@
         aria-expanded={growthHelpOpen}
         aria-controls="growth-help"
         aria-label="About {growthHelp.label}"
-        onclick={() => (growthHelpOpen = !growthHelpOpen)}>?</button
+        onclick={() => (growthHelpOpen = !growthHelpOpen)}
       >
+        ?
+      </button>
     </div>
     {#if growthHelpOpen}
       <p class="helptext" id="growth-help">{growthHelp.help} <cite>{growthHelp.ref}</cite></p>
@@ -483,8 +493,10 @@
           aria-expanded={flowHelpOpen}
           aria-controls="flow-help"
           aria-label="About {flowHelp.label}"
-          onclick={() => (flowHelpOpen = !flowHelpOpen)}>?</button
+          onclick={() => (flowHelpOpen = !flowHelpOpen)}
         >
+          ?
+        </button>
       </div>
       {#if flowHelpOpen}
         <p class="helptext" id="flow-help">{flowHelp.help} <cite>{flowHelp.ref}</cite></p>
@@ -511,8 +523,10 @@
             aria-expanded={edgesHelpOpen}
             aria-controls="edges-help"
             aria-label="About {flowEdgesHelp.label}"
-            onclick={() => (edgesHelpOpen = !edgesHelpOpen)}>?</button
+            onclick={() => (edgesHelpOpen = !edgesHelpOpen)}
           >
+            ?
+          </button>
         </div>
         {#if edgesHelpOpen}
           <p class="helptext" id="edges-help">{flowEdgesHelp.help}</p>
@@ -541,8 +555,10 @@
               aria-expanded={territoryHelpOpen}
               aria-controls="territory-help"
               aria-label="About {territoryHelp.label}"
-              onclick={() => (territoryHelpOpen = !territoryHelpOpen)}>?</button
+              onclick={() => (territoryHelpOpen = !territoryHelpOpen)}
             >
+              ?
+            </button>
           </div>
           {#if territoryHelpOpen}
             <p class="helptext" id="territory-help">{territoryHelp.help} <cite>{territoryHelp.ref}</cite></p>
@@ -568,8 +584,10 @@
             aria-expanded={tubeHelpOpen}
             aria-controls="tube-help"
             aria-label="About {tubeViewHelp.label}"
-            onclick={() => (tubeHelpOpen = !tubeHelpOpen)}>?</button
+            onclick={() => (tubeHelpOpen = !tubeHelpOpen)}
           >
+            ?
+          </button>
         </div>
         {#if tubeHelpOpen}
           <p class="helptext" id="tube-help">{tubeViewHelp.help}</p>
@@ -610,8 +628,10 @@
             aria-expanded={slimeHelpOpen}
             aria-controls="slime-help"
             aria-label="About {slimeViewHelp.label}"
-            onclick={() => (slimeHelpOpen = !slimeHelpOpen)}>?</button
+            onclick={() => (slimeHelpOpen = !slimeHelpOpen)}
           >
+            ?
+          </button>
         </div>
         {#if slimeHelpOpen}
           <p class="helptext" id="slime-help">{slimeViewHelp.help}</p>
@@ -633,8 +653,10 @@
               aria-expanded={frontHelpOpen}
               aria-controls="front-help"
               aria-label="About {frontViewHelp.label}"
-              onclick={() => (frontHelpOpen = !frontHelpOpen)}>?</button
+              onclick={() => (frontHelpOpen = !frontHelpOpen)}
             >
+              ?
+            </button>
           </div>
           {#if frontHelpOpen}
             <p class="helptext" id="front-help">{frontViewHelp.help}</p>

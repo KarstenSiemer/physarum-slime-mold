@@ -10,6 +10,7 @@ import { dishRadius } from './brush';
 import { electrodesOver, POLE_COLOR, POLE_RIM, POLE_SHADE, polesAt, SUN, type Rgb } from './electrode-reference';
 import { WebGl2Backend } from './gl/backend';
 import renderFrag from './gl/glsl/render.frag?raw';
+import { instance } from './instance';
 import { onOutline, outlineAt, outlineCell, type OutlineGrid } from './outline-reference';
 import { BACKGROUND, LATTICE_COPIES } from './render';
 import renderWgsl from './shaders/render.wgsl?raw';
@@ -759,7 +760,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
   it('draws no pole after Clear, and the next pole from the buffer that the simulation holds then', async () => {
     const settings = plain({ style: 'gel' });
     const sim = await make(settings);
-    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
     device?.pushErrorScope('validation');
     const none = new Uint8Array(W * H * 4);
     const bare = pictureOf(none, [W, H], settings, CLOSE, CLOSE_SIZE);
@@ -927,7 +928,7 @@ describe.each(Object.entries(BACKENDS))('the picture of the electrodes on %s', (
       hook.renderFrom();
     });
     // A new WebGPU renderer counts frames from 0, so both runs dither alike; WebGL2 captures keep the frame.
-    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
     device?.pushErrorScope('validation');
     hook.renderFrom(kind === 'webgpu' ? WITHOUT_POLES.wgsl : WITHOUT_POLES.glsl);
     const before = await captures();

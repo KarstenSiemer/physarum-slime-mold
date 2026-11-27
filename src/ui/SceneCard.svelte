@@ -60,8 +60,10 @@
         aria-expanded={sourceOpen}
         aria-controls="scene-source"
         title="Where these settings come from"
-        onclick={() => (sourceOpen = !sourceOpen)}>{scene.source}</button
+        onclick={() => (sourceOpen = !sourceOpen)}
       >
+        {scene.source}
+      </button>
       <span class="chip">{app.settings.model === 'jones' ? 'Only Jones’ rules' : 'Jones plus this app’s rules'}</span>
       {#if app.settings.collisions}<span class="chip">One agent per cell</span>{/if}
       {#if growthChip}<span class="chip">{growthChip}</span>{/if}
@@ -76,8 +78,10 @@
           class="ghost"
           onclick={() => {
             openLearn(LEARN[sourceKind(scene)]);
-          }}>More in Learn</button
+          }}
         >
+          More in Learn
+        </button>
       </div>
     {/if}
     <p class="summary">{scene.summary}</p>
@@ -88,9 +92,9 @@
       <!-- A link only: no figure has a licence that lets the app show it (ADR 0037). -->
       <p class="figure">
         The result in the paper:
-        <a href={scene.figure.href} target="_blank" rel="noreferrer"
-          >{scene.figure.label}<span class="sr-only"> (opens in a new tab)</span></a
-        >, {scene.figure.note}.
+        <a href={scene.figure.href} target="_blank" rel="noreferrer">
+          {scene.figure.label}<span class="sr-only"> (opens in a new tab)</span>
+        </a>, {scene.figure.note}.
       </p>
     {/if}
     {#if changed}
@@ -100,8 +104,10 @@
           type="button"
           onclick={() => {
             void reload(scene.id);
-          }}>Reload scene</button
+          }}
         >
+          Reload scene
+        </button>
       </p>
     {/if}
     <details bind:open={app.sceneAbout}>
@@ -111,10 +117,10 @@
         {#each app.settings.strains as st, i (i)}
           <li>
             <span class="dot" style:--c={st.color} aria-hidden="true"></span>
-            <span
-              ><strong>{letter(i)}</strong>
-              {role(i)}: {strainNumbers(app.settings, i, scene.env)}.</span
-            >
+            <span>
+              <strong>{letter(i)}</strong>
+              {role(i)}: {strainNumbers(app.settings, i, scene.env)}.
+            </span>
           </li>
         {/each}
       </ul>

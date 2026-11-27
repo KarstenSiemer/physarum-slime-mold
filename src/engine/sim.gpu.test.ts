@@ -41,6 +41,7 @@ import {
 } from './gl/programs';
 import { GlSim } from './gl/sim';
 import { grid, growthStep, occupancy, rngSeed, stream } from './growth-reference';
+import { instance } from './instance';
 import { AgentToolKind, startEnds, strainAgents, strainEnds, type AgentTool } from './pack';
 import { outlineModel, POLE_SCHEME, refreshModel } from './outline-reference';
 import { paintReference } from './paint-reference';
@@ -832,7 +833,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           };
 
     async function wrappedOnWebGpu(code: string): Promise<number[][]> {
-      const { device } = (backend as WebGpuBackend).gpu;
+      const { device } = instance(backend, WebGpuBackend).gpu;
       device.pushErrorScope('validation');
       const data = new Int32Array(CASES.flat());
       const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
@@ -1083,7 +1084,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     it.runIf(kind === 'webgpu')(
       'build the diffusion and outline passes at their first use, and each once',
       async () => {
-        const { device } = (backend as WebGpuBackend).gpu;
+        const { device } = instance(backend, WebGpuBackend).gpu;
         const now = vi.spyOn(device, 'createComputePipeline');
         const later = vi.spyOn(device, 'createComputePipelineAsync');
         onTestFinished(() => {
@@ -1272,8 +1273,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   // first the view runs the step's diffusion passes without its sources into textures that the simulation does not
   // read; sensing first the trail is that map, and the view draws it without a pass.
   describe('the view (ADR 0027)', () => {
-    const viewOf = (sim: Sim) => (kind === 'webgpu' ? (sim as Simulation).viewTexture : (sim as GlSim).viewTrail());
-    const trailOf = (sim: Sim) => (kind === 'webgpu' ? (sim as Simulation).current.trail : (sim as GlSim).currentTrail);
+    const viewOf = (sim: Sim) =>
+      kind === 'webgpu' ? instance(sim, Simulation).viewTexture : instance(sim, GlSim).viewTrail();
+    const trailOf = (sim: Sim) =>
+      kind === 'webgpu' ? instance(sim, Simulation).current.trail : instance(sim, GlSim).currentTrail;
     const bits = (a: Float32Array, b: Float32Array) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
     const state = async (sim: Sim) => ({
       agents: await sim.readAgents(),
@@ -1419,7 +1422,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     /** Runs `body` and expects no validation error of the device: a pipeline of the window is built at its first use. */
     async function valid<T>(body: () => Promise<T>): Promise<T> {
       if (kind !== 'webgpu') return body();
-      const { device } = (backend as WebGpuBackend).gpu;
+      const { device } = instance(backend, WebGpuBackend).gpu;
       device.pushErrorScope('validation');
       const out = await body();
       expect((await device.popErrorScope())?.message).toBeUndefined();
@@ -2607,7 +2610,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       let walled: () => string[];
       let errors = async (during: () => Promise<void>) => during();
       if (kind === 'webgpu') {
-        const { device } = (backend as WebGpuBackend).gpu;
+        const { device } = instance(backend, WebGpuBackend).gpu;
         const now = vi.spyOn(device, 'createComputePipeline');
         const later = vi.spyOn(device, 'createComputePipelineAsync');
         onTestFinished(() => {
@@ -2753,7 +2756,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     /** A WebGPU simulation from another agent shader; a validation error fails the test. */
     async function variant(wgsl: string, s: Settings, w: number, h: number, n: number) {
-      const { device } = (backend as WebGpuBackend).gpu;
+      const { device } = instance(backend, WebGpuBackend).gpu;
       device.pushErrorScope('validation');
       const sim = await Simulation.create(device, s, w, h, n, wgsl);
       expect((await device.popErrorScope())?.message).toBeUndefined();
@@ -2772,7 +2775,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
             ];
       live.push(...sims);
       // The pipelines for walls are built at the first paint with a wall (Kernels.walled in sim.ts).
-      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
       device?.pushErrorScope('validation');
       for (const sim of sims) {
         sim.paint(walls);
@@ -2870,7 +2873,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
     beforeAll(async () => {
       if (kind === 'webgpu') {
-        const { device } = (backend as WebGpuBackend).gpu;
+        const { device } = instance(backend, WebGpuBackend).gpu;
         (await Simulation.create(device, defaultSettings(), 16, 16, 1, PLAIN.agentsWgsl, PLAIN.diffuseWgsl)).destroy();
         return;
       }
@@ -2889,7 +2892,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     async function build(s: Settings, w: number, h: number, n: number, plain = false) {
       let sim: Sim;
       if (kind === 'webgpu') {
-        const { device } = (backend as WebGpuBackend).gpu;
+        const { device } = instance(backend, WebGpuBackend).gpu;
         device.pushErrorScope('validation');
         sim = plain
           ? await Simulation.create(device, s, w, h, n, PLAIN.agentsWgsl, PLAIN.diffuseWgsl)
@@ -6219,7 +6222,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
     // pass fail with no error in its results. Each pass must take a bind group of exactly its list.
     it('binds exactly the resources that each growth pass uses', async () => {
       if (kind !== 'webgpu') return; // WebGL2 binds its textures by name
-      const { device } = (backend as WebGpuBackend).gpu;
+      const { device } = instance(backend, WebGpuBackend).gpu;
       const sim = await make({ ...GROWTH }, 16, 16, 4);
       type Passes = Record<string, GPUComputePipeline>;
       const kernels = (sim as unknown as { kernels: { growth(flow: boolean, territory?: boolean): Passes } }).kernels;
@@ -6449,7 +6452,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       // builds every pipeline for new sources, which takes over 16 s on SwiftShader (CI).
       beforeAll(async () => {
         if (kind === 'webgpu') {
-          const { device } = (backend as WebGpuBackend).gpu;
+          const { device } = instance(backend, WebGpuBackend).gpu;
           const s = defaultSettings();
           const sim = await Simulation.create(device, s, 16, 16, 1, undefined, undefined, 1, PLAIN_INIT.wgsl);
           // The passes for walls of these sources too: the first test paints a wall.
@@ -6478,7 +6481,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       async function build(s: Settings, w: number, h: number, n: number, plain: boolean) {
         let sim: Sim;
         if (kind === 'webgpu') {
-          const { device } = (backend as WebGpuBackend).gpu;
+          const { device } = instance(backend, WebGpuBackend).gpu;
           sim = plain
             ? await Simulation.create(device, s, w, h, n, undefined, undefined, n, PLAIN_INIT.wgsl)
             : await backend.createSim(s, w, h, n);
@@ -7122,12 +7125,12 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       // Every cell deep inside food.
       const garbage = Uint8Array.from({ length: W * H * 4 }, (_, i) => (i % 4 === 1 ? 255 : 0));
       if (kind === 'webgpu') {
-        const s = sim as Simulation;
+        const s = instance(sim, Simulation);
         s.device.queue.writeBuffer(s.shape, 0, garbage);
       } else {
         const gl = canvas.getContext('webgl2');
         if (!gl) throw new Error('The WebGL2 backend has no context.');
-        gl.bindTexture(gl.TEXTURE_2D, (sim as GlSim).shapeTexture);
+        gl.bindTexture(gl.TEXTURE_2D, instance(sim, GlSim).shapeTexture);
         gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, garbage);
       }
       const ignored = await captures();
@@ -7545,7 +7548,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
         hook.renderFrom();
       });
       // A new WebGPU renderer counts frames from 0, so both runs dither alike; WebGL2 captures keep the frame.
-      const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+      const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
       device?.pushErrorScope('validation');
       hook.renderFrom(kind === 'webgpu' ? WITHOUT_SCENT.wgsl : WITHOUT_SCENT.glsl);
       const before = await captures();
@@ -7568,7 +7571,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       let ready: () => Promise<unknown>;
       let frame: () => void;
       if (kind === 'webgpu') {
-        const gpu = backend as WebGpuBackend;
+        const gpu = instance(backend, WebGpuBackend);
         onTestFinished(() => {
           vi.restoreAllMocks();
           gpu.renderFrom();
@@ -8304,7 +8307,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
   // The gel height field has a one-cell border, so it is two texels larger than the grid (render.ts).
   if (kind === 'webgpu')
     it.each([true, false])('draws a grid at the largest side it reports, in every style (wide %s)', async (wide) => {
-      const { device } = (backend as WebGpuBackend).gpu;
+      const { device } = instance(backend, WebGpuBackend).gpu;
       const side = backend.maxGridSide;
       const sim = await make({}, wide ? side : 16, wide ? 16 : side, 64);
       for (const style of STYLES) {
@@ -8323,7 +8326,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       // 72 steps: sorting every 1, 8 or 32 steps makes 72, 9 or 3 sorts, so runs end on either buffer.
       async function open(collisions: boolean, sortInterval: number) {
         const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
-        const sim = (await make(patch, 64, 48, collisions ? 1536 : 6144)) as Simulation;
+        const sim = instance(await make(patch, 64, 48, collisions ? 1536 : 6144), Simulation);
         sim.sortInterval = sortInterval;
         sim.run(72);
         return sim;
@@ -8341,7 +8344,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           boundary: 'box',
           shrink: 0.01,
         };
-        const sim = (await make(patch, 61, 45, collisions ? 1001 : 5003)) as Simulation;
+        const sim = instance(await make(patch, 61, 45, collisions ? 1001 : 5003), Simulation);
         sim.sortInterval = sortInterval;
         sim.paint([{ kind: 'wall', from: [10, 10], to: [50, 30], radius: 1.5 }]);
         sim.run(20);
@@ -8356,7 +8359,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       async function walled(collisions: boolean, sortInterval: number) {
         const far = [9, 30, 64].map((sensorOffset, i) => ({ ...defaultStrain(i), sensorOffset }));
         const patch = { seed: 13, collisions, density: collisions ? 0.5 : 2, strains: far };
-        const sim = (await make(patch, 64, 48, collisions ? 1536 : 6144)) as Simulation;
+        const sim = instance(await make(patch, 64, 48, collisions ? 1536 : 6144), Simulation);
         sim.sortInterval = sortInterval;
         sim.paint(WALLS);
         sim.reset();
@@ -8402,8 +8405,8 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
           const n = collisions ? 2400 : 9600;
           const [inStep, ahead] = [
-            (await make(patch, 80, 60, n)) as Simulation,
-            (await make(patch, 80, 60, n)) as Simulation,
+            instance(await make(patch, 80, 60, n), Simulation),
+            instance(await make(patch, 80, 60, n), Simulation),
           ];
           inStep.run(70);
           let sorts = 0;
@@ -8436,7 +8439,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       );
 
       it('really reorders the buffer, and keeps every id once', async () => {
-        const sim = (await make({ seed: 7, density: 2, strains: [defaultStrain(0)] }, 96, 80, 15360)) as Simulation;
+        const sim = instance(
+          await make({ seed: 7, density: 2, strains: [defaultStrain(0)] }, 96, 80, 15360),
+          Simulation,
+        );
         sim.run(33); // two sorts: steps 0 and 32
         const raw = new Uint32Array(await readBuffer(sim.device, sim.agentBuffer));
         const ids = Array.from({ length: sim.agents }, (_, k) => (raw[k * 4 + 3] ?? 0) >>> 3);
@@ -8464,7 +8470,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       it('builds the occupancy from the current buffer when collisions are switched on', async () => {
         const run = async (sortInterval: number) => {
           const settings = { ...defaultSettings(), seed: 9, density: 0.5, strains };
-          const sim = (await make(settings, 64, 48, 1500)) as Simulation;
+          const sim = instance(await make(settings, 64, 48, 1500), Simulation);
           sim.sortInterval = sortInterval;
           sim.run(1); // sorted: buffer 1 is current
           sim.update({ ...settings, collisions: true });
@@ -8476,7 +8482,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
       it.each([false, true])('starts over from scratch after an odd number of sorts (collisions %s)', async (c) => {
         const patch = { seed: 9, collisions: c, density: 0.5, strains };
-        const sim = (await make(patch, 64, 48, 1500)) as Simulation;
+        const sim = instance(await make(patch, 64, 48, 1500), Simulation);
         sim.run(1); // sorted: buffer 1 is current
         sim.reset();
         sim.run(40);
@@ -8496,7 +8502,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
 
       async function open(collisions: boolean, sortInterval: number) {
         const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
-        const sim = (await make(patch, 200, 150, collisions ? 15_001 : 60_001)) as GlSim;
+        const sim = instance(await make(patch, 200, 150, collisions ? 15_001 : 60_001), GlSim);
         sim.sortInterval = sortInterval;
         sim.run(72);
         return sim;
@@ -8513,7 +8519,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
           boundary: 'box',
           shrink: 0.01,
         };
-        const sim = (await make(patch, 197, 141, collisions ? 1_001 : 30_003)) as GlSim;
+        const sim = instance(await make(patch, 197, 141, collisions ? 1_001 : 30_003), GlSim);
         sim.sortInterval = sortInterval;
         sim.paint([WIDE]);
         sim.run(20);
@@ -8527,7 +8533,7 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       // Covered food counts the agents per cell after the moves with a point pass (diffuse.frag COVERED).
       async function covered(collisions: boolean, sortInterval: number) {
         const patch = { seed: 13, collisions, coveredFood: true, density: collisions ? 0.5 : 2, strains };
-        const sim = (await make(patch, 150, 130, collisions ? 9_751 : 39_000)) as GlSim;
+        const sim = instance(await make(patch, 150, 130, collisions ? 9_751 : 39_000), GlSim);
         sim.sortInterval = sortInterval;
         sim.paint([{ kind: 'food', from: [30, 30], to: [120, 100], radius: 6 }]);
         sim.run(72);
@@ -8579,12 +8585,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       // The keys of the sort are those of the agents at the sort: the tile of the cell of a living agent, and the key
       // after the last tile for a dead one and for a slot past the last agent. Equal keys keep the order of the index.
       it('orders every slot once, by the tile of its agent, and inside a tile by index', async () => {
-        const sim = (await make(
-          { seed: 5, density: 1, strains, boundary: 'box', shrink: 0.01 },
-          197,
-          141,
-          20_001,
-        )) as GlSim;
+        const sim = instance(
+          await make({ seed: 5, density: 1, strains, boundary: 'box', shrink: 0.01 }, 197, 141, 20_001),
+          GlSim,
+        );
         sim.sortInterval = 0;
         sim.run(64); // the next step sorts with an interval of 32
         const agents = await sim.readAgents();
@@ -8624,7 +8628,10 @@ describe.each(Object.entries(BACKENDS))('%s', (kind, create) => {
       it.each([false, true])('sorts ahead of its step with the same state (collisions %s)', async (collisions) => {
         const patch = { seed: 7, collisions, density: collisions ? 0.5 : 2, strains };
         const n = collisions ? 7_500 : 30_000;
-        const [inStep, ahead] = [(await make(patch, 150, 100, n)) as GlSim, (await make(patch, 150, 100, n)) as GlSim];
+        const [inStep, ahead] = [
+          instance(await make(patch, 150, 100, n), GlSim),
+          instance(await make(patch, 150, 100, n), GlSim),
+        ];
         inStep.run(70);
         let sorts = 0;
         const turn = (steps: number) => {

@@ -73,9 +73,9 @@
       <span class="name"></span>
       <span class="scale ticks">
         {#each SCENT_LEVELS as v, i (v)}
-          <span class:odd={i % 2 === 1} style:left="{(i / SCENT_TOP) * 100}%"
-            >{label(v)}{i === SCENT_TOP ? '+' : ''}</span
-          >
+          <span class:odd={i % 2 === 1} style:left="{(i / SCENT_TOP) * 100}%">
+            {label(v)}{i === SCENT_TOP ? '+' : ''}
+          </span>
         {/each}
       </span>
     </div>

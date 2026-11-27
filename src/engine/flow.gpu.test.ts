@@ -10,6 +10,7 @@ import { flowFlux, flowStart, flowStep, openCell, roleSigns, type FlowFields, ty
 import { WebGl2Backend } from './gl/backend';
 import { compile } from './gl/programs';
 import { growthStep } from './growth-reference';
+import { instance } from './instance';
 import { AgentToolKind, strainEnds, type AgentTool } from './pack';
 import { GlSim } from './gl/sim';
 import { flowSites, foodStrokes, type FlowSites, type FoodStroke } from './sites';
@@ -1482,7 +1483,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const [w, h] = [48, 48];
     const settings = flowing({ seed: 3 });
     const sim = await make(settings, w, h, 2000, 600);
-    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
     device?.pushErrorScope('validation');
     // Four steps bind the passes at both parities of the buffers.
     expect(await moved(sim, 4)).toBeGreaterThan(300);
@@ -1503,7 +1504,7 @@ describe.each(Object.entries(BACKENDS))('the flow in the tubes on %s', (kind, cr
     const [w, h] = [48, 48];
     const base = flowing({ seed: 4, density: 0.065, capacity: 0.65 });
     const sim = await make(base, w, h, 2000, 600);
-    const device = kind === 'webgpu' ? (backend as WebGpuBackend).gpu.device : undefined;
+    const device = kind === 'webgpu' ? instance(backend, WebGpuBackend).gpu.device : undefined;
     const food = (x: number): Stroke => ({ kind: 'food', from: [x, 30.5], to: [x, 30.5], radius: 3 });
     /** The state of the second strain as read right after the settings lost that strain. */
     let second: Promise<Float32Array> | undefined;

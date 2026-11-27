@@ -5,9 +5,10 @@ import { describe, expect, it } from 'vitest';
 import { toJones, type Boundary } from '../model/params';
 import { presetById } from '../model/presets';
 import { dishRadius, paintsCell, SLACK } from './brush';
-import { CpuBackend, type CpuSim, hold } from './cpu-backend';
+import { CpuBackend, CpuSim, hold } from './cpu-backend';
 import { Engine } from './engine';
 import { fromShape, fromStroke, MIN_RADIUS, strokeOn, type EnvEdit } from './environment';
+import { instance } from './instance';
 import { paintReference } from './paint-reference';
 import { slimePaint } from './slime-reference';
 import { compact, Placement, sweep } from './sweep';
@@ -510,7 +511,7 @@ describe('the engine with the sweep', () => {
       const start = { ...p.settings(), resolution: pick([256, 512] as const), seed: 7 };
       const engine = await Engine.create(canvas, start, undefined, backend);
       await engine.load(start, p.env ?? []);
-      const sim = () => engine.sim as CpuSim;
+      const sim = () => instance(engine.sim, CpuSim);
       const strokeOnScreen = () => {
         const [w, h] = [sim().width, sim().height];
         return strokeNear(rand, spotsOf(rand, w, h), w, h, engine.settings.boundary);
@@ -579,7 +580,7 @@ describe('the engine with painted slime', () => {
       const start = { ...p.settings(), model: 'extended' as const, lattice: null, resolution: 256, seed: 7 };
       const engine = await Engine.create(canvas, start, undefined, backend);
       await engine.load(start, p.env ?? []);
-      const sim = () => engine.sim as CpuSim;
+      const sim = () => instance(engine.sim, CpuSim);
       const strokeOnScreen = () => {
         const [w, h] = [sim().width, sim().height];
         return strokeNear(rand, spotsOf(rand, w, h), w, h, engine.settings.boundary, SLIMY);
