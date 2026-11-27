@@ -1,16 +1,10 @@
 // Flow in the tubes (ADR 0029): the switch of the extended model, its strength, the scene card and the link.
 // The file sorts after scenes.spec.ts (it was flow.spec.ts): CI shares the e2e tests out to its shards by their count,
-// in the order of the files, so its tests that wait for steps run in the second shard, beside the short tests of
-// ui.spec.ts, and the other tests that wait for steps in the first (ADR 0049).
+// in the order of the files, so its tests that wait for steps run beside the short tests of scenes.spec.ts and
+// ui.spec.ts, apart from the other tests that wait for steps (ADR 0049, ADR 0102).
 import { expect, test, type Page } from '@playwright/test';
-import { decodeLink } from '../../src/model/url';
+import { alive, colonyScene, grow, LIMIT, linked, open, steps } from './colony';
 import { smallScene, watchErrors } from './helpers';
-
-// The start took 32 s on SwiftShader on an M3 Pro (review of 2026-11-11): 150 s keeps it under a quarter (ADR 0010).
-async function open(page: Page, url: string) {
-  await page.goto(url);
-  await page.waitForFunction(() => (globalThis.physarum?.sim.step ?? 0) > 5, undefined, { timeout: 150_000 });
-}
 
 // The steps of a wait, measured on 2026-11-15 on WebGPU and WebGL2, on the GPU of an M3 Pro and on SwiftShader in the
 // image of CI. The runs differ a little, so each wait has a margin.
@@ -21,47 +15,6 @@ const TUBES = 30;
 // more after 10 steps, which is too few, and 50 to 133 more after 30. Each colony of Rival networks has 76 or more
 // agents more after 30 steps.
 const GROWN = 30;
-// The limit of a wait for steps. In the image of CI on 4 cores of an M3 Pro, the first 30 steps took 27 s in the Maze
-// and in Rival networks and 34 s on the Tokyo scene, and GitHub is about 3 times slower (ADR 0010).
-const WAIT = 300_000;
-// The limit of a test with such a wait: two starts of the app and the wait.
-const LIMIT = 480_000;
-
-// A result of the simulation comes with its steps, not with the seconds: a test waits for a step and then reads once.
-// A wait of seconds for a result failed on GitHub, where a slow runner made too few steps (TODO.md, 2026-11-15).
-// The limit of the wait is only a guard against a simulation that stands still.
-const steps = (page: Page, n: number) =>
-  page.waitForFunction((n) => (globalThis.physarum?.sim.step ?? 0) >= n, n, { timeout: WAIT });
-// The agents alive of each strain, and a step that the simulation had reached at most when it counted them.
-const alive = (page: Page) =>
-  page.evaluate(async () => {
-    const sim = globalThis.physarum?.sim;
-    const alive = [...((await sim?.alive()) ?? [])];
-    return { alive, step: sim?.step ?? 0 };
-  });
-// Waits for a scene with the flow on a grid of this width, and lets it rest at once, in the frame that sees it: the
-// first count is then of step 2 to 7. Only a young colony grows by 20 agents for sure: a first count many steps late,
-// as on a fast machine under load, found colonies of 200 to 270 agents that grew no more in 30 steps, and a rival
-// that had lost agents (3 of 30 runs, 2026-11-15). grow() lets the scene run again.
-const colonyScene = (page: Page, width: number) =>
-  page.waitForFunction(
-    (width) => {
-      const engine = globalThis.physarum;
-      if (!engine?.settings.flow || engine.sim.width !== width) return false;
-      engine.paused = true;
-      return true;
-    },
-    width,
-    { timeout: 150_000 },
-  );
-const grow = async (page: Page, to: number) => {
-  await page.evaluate(() => {
-    if (globalThis.physarum) globalThis.physarum.paused = false;
-  });
-  await steps(page, to);
-};
-
-const linked = async (page: Page) => (await decodeLink(await page.evaluate(() => location.hash.slice(1))))?.settings;
 const memory = (page: Page) => page.evaluate(async () => (await globalThis.physarum?.sim.readFlow())?.length ?? -1);
 
 // A small extended scene: the switch turns the flow on while the scene runs, the simulation then holds the memory of
@@ -255,75 +208,5 @@ test('the switch below the flow strength draws the tubes by their flow, and chan
   await expect(tubes).toHaveCount(0);
   await page.waitForFunction(() => globalThis.physarum?.settings.flow === false);
   expect((await differs()).cells).toBe(0);
-  expect(errors).toEqual([]);
-});
-
-// The Crown of veins (ADR 0087): the rules of the growth front with the levers of the crown of ADR 0084, which the Flow
-// section shows. The colony starts on the food at the closed end of the neck, and its growth front takes the flux of
-// the tubes from its first steps on. Since every birth comes from the budget and the front is paid in the share of its
-// sinks (ADR 0100), a young colony grows slower: in 20 runs on WebGPU and WebGL2 on the GPU of an M3 Pro (seeds 1 to
-// 10), from a first count at step 2 to 7 it grew by at least 6 agents in 30 steps, too few to tell growth with a
-// margin, and by at least 25 in 60 steps (CROWN_GROWN); it had 6 to 21 sinks at step 30. It leaves the neck
-// only after 1,150 to 1,450 steps (`bash research/front/e5b.sh neck`): too many for CI, whose SwiftShader runs the
-// scene at about one step per second in the image on 4 cores (ADR 0087).
-const CROWN_GROWN = 60;
-test('the Crown of veins shows its rules and levers in the Flow section, and its front takes flux', async ({
-  page,
-}) => {
-  test.setTimeout(LIMIT);
-  const errors = watchErrors(page);
-  await open(page, await smallScene({ resolution: 256 }));
-  await page.getByRole('combobox', { name: 'Preset' }).selectOption('crown');
-  await colonyScene(page, 520);
-  const card = page.getByRole('region', { name: 'Scene', exact: true });
-  await expect(card.getByRole('heading', { name: 'Crown of veins' })).toBeVisible();
-  await expect(card.getByText('changed', { exact: true })).toHaveCount(0);
-  // The Flow section shows the rules and the levers with the values of the scene.
-  await page.locator('summary', { hasText: 'Flow' }).click();
-  await expect(page.getByRole('checkbox', { name: 'Flow over 8 neighbours', exact: true })).toBeChecked();
-  await expect(page.getByLabel('Base conductance value')).toHaveValue('0.002');
-  await expect(page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true })).toBeChecked();
-  await expect(page.getByLabel('Drift value')).toHaveValue('1.50');
-  await expect(page.getByLabel('Flux to the front value')).toHaveValue('2');
-  // The colony of about 50 agents on the food grows, and its growth front has sinks: cells that take the flux of the
-  // strain hold their rate with a minus sign (Sim.readSinks()).
-  const first = await alive(page);
-  const colony = first.alive[0] ?? 0;
-  expect(colony).toBeGreaterThan(20);
-  expect(colony).toBeLessThan(200);
-  await grow(page, first.step + CROWN_GROWN);
-  const later = await page.evaluate(async () => {
-    const sim = globalThis.physarum?.sim;
-    if (!sim) return { alive: -1, sinks: -1 };
-    const [alive, sinks] = [(await sim.alive())[0] ?? -1, await sim.readSinks(0)];
-    return { alive, sinks: sinks.filter((r) => r < 0).length };
-  });
-  expect(later.alive).toBeGreaterThan(colony + 12);
-  expect(later.sinks).toBeGreaterThan(0);
-  // The link holds the rules and the levers of the scene.
-  await expect
-    .poll(async () => {
-      const s = await linked(page);
-      return s && [s.territory, s.drift, s.flowEdges, s.flowBase, s.frontFlux];
-    })
-    .toEqual([true, 1.5, 8, 0.002, 2]);
-  // Each control shows only where it acts: the drift and the flux to the front with the rules, the rules and the
-  // levers of the flow with the flow.
-  await page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true }).uncheck();
-  await expect(page.getByLabel('Drift value')).toHaveCount(0);
-  await expect(page.getByLabel('Flux to the front value')).toHaveCount(0);
-  await expect(page.getByLabel('Base conductance value')).toHaveValue('0.002');
-  // The switch on sets the levers of the Crown of veins again (ADR 0098).
-  const base = page.getByLabel('Base conductance value');
-  await base.fill('0.02');
-  await base.press('Enter');
-  await page.waitForFunction(() => globalThis.physarum?.settings.flowBase === 0.02);
-  await page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true }).check();
-  await expect(base).toHaveValue('0.002');
-  await expect(page.getByLabel('Flux to the front value')).toHaveValue('2');
-  await page.getByRole('checkbox', { name: 'Flow in the tubes', exact: true }).uncheck();
-  await expect(page.getByRole('checkbox', { name: 'Rules of the growth front', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('checkbox', { name: 'Flow over 8 neighbours', exact: true })).toHaveCount(0);
-  await expect(page.getByLabel('Base conductance value')).toHaveCount(0);
   expect(errors).toEqual([]);
 });

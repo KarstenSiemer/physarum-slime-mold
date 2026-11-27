@@ -15,7 +15,7 @@ export default defineConfig({
     { name: 'pictures', testDir: 'tests/pictures' },
   ],
   // Each test is a test of its own for --shard: CI shares them out by their count, in the order of the files. The
-  // slowest tests wait for many steps in tubes.spec.ts, which sorts after scenes.spec.ts into the second shard (ADR 0049).
+  // slowest tests wait for many steps in tubes.spec.ts and veins.spec.ts, which sort apart (ADR 0049, ADR 0102).
   fullyParallel: true,
   // One browser at a time on CI: parallel WebGPU browsers are flaky on SwiftShader.
   ...(ci ? { workers: 1 } : {}),
@@ -24,7 +24,8 @@ export default defineConfig({
   timeout: ci ? 240_000 : 30_000,
   forbidOnly: ci,
   retries: ci ? 1 : 0,
-  reporter: ci ? [['github'], ['html', { open: 'never' }]] : 'list',
+  // CI prints a line with the time of each test: the log of a shard shows which tests fill its 30 minutes (ADR 0102).
+  reporter: ci ? [['list'], ['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://localhost:${port}`,
     channel: webgpuLaunch.channel,

@@ -73,7 +73,7 @@ are in the ADRs it names.
   there: reproduce it in that image before a fix.
 - An e2e test waits for a number of steps, not for a time, before it reads a result of the simulation: a slow runner
   of CI makes few steps per second (`tests/e2e/tubes.spec.ts`).
-- CI shares the e2e tests out to four shards by their count, in the order of the files, and runs the GPU tests in
+- CI shares the e2e tests out to six shards by their count, in the order of the files, and runs the GPU tests in
   four parts: by the backend in the name of a test, and `src/engine/sim.gpu.test.ts` apart from the other files
   (ADR 0061). A start of the app builds only the passes that it runs, and a new file of tests that wait for steps can
   tip the shards (ADR 0049).
