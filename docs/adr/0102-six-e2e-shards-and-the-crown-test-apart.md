@@ -4,6 +4,7 @@
   that day to repair the shards. It changes `.github/workflows/ci.yml`, so it needs the owner's review (ADR 0014).
 - Date: 2026-11-27
 - Extends [ADR 0061](0061-the-tests-of-ci-run-in-eight-jobs.md), which made four e2e shards.
+- Extended by ADR 0103.
 
 ## Context
 
