@@ -27,7 +27,7 @@
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.65.1",
     "@sveltejs/vite-plugin-svelte": "7.3.2",
-    "@types/node": "26.6.7",
+    "@types/node": "26.6.10",
     "@vitest/browser-playwright": "5.1.1",
     "@webgpu/types": "0.1.74",
     "eslint": "10.15.0",
